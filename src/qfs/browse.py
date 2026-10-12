@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import os
+import re
 import tempfile
 
 import numpy as np
@@ -13,6 +14,16 @@ from .compare import MEMBERS, METRICS, SCENARIOS
 from .data import sha256
 
 
+# Supported report versions have fixed inventories; never infer coverage from a
+# supplied hash map or from the files currently present on disk.
+RAW_FILES = {'summary.json', 'trades.csv', 'equity.csv', 'manifest.json'}
+COMPARISON_HASH_FILES = {'comparison.csv', 'periods.csv', 'report.md'}
+COMPARISON_FILES = COMPARISON_HASH_FILES | {'comparison.json'} | {
+    f'reports/{scene}/{member}/{name}'
+    for scene, _, _ in SCENARIOS for member, _ in MEMBERS for name in RAW_FILES
+}
+
+
 def inside(root, relative):
     path = (root / relative).resolve()
     if not path.is_relative_to(root):
@@ -20,7 +31,19 @@ def inside(root, relative):
     return path
 
 
-def check_files(root, expected):
+def check_hash_manifest(root, expected, required):
+    if not isinstance(expected, dict) or set(expected) != required:
+        missing = sorted(required - set(expected)) if isinstance(expected, dict) else sorted(required)
+        unexpected = sorted(set(expected) - required) if isinstance(expected, dict) else []
+        raise ValueError(f'browse: incomplete/invalid hash manifest {root}: '
+                         f'missing={missing}, unexpected={unexpected}; require fixed object inventory')
+    for relative, digest in expected.items():
+        if not isinstance(digest, str) or re.fullmatch(r'[0-9a-f]{64}', digest) is None:
+            raise ValueError(f'browse: invalid hash manifest digest {root / relative}: require SHA-256 hex')
+
+
+def check_files(root, expected, required):
+    check_hash_manifest(root, expected, required)
     for relative, digest in expected.items():
         path = inside(root, relative)
         if sha256(path) != digest:
@@ -52,14 +75,28 @@ def display_samples(curve, buckets=160):
     return [[str(curve.time.iloc[i]), float(equity[i]), float(drawdown[i])] for i in sorted(keep)]
 
 
-def comparison_view(root, label):
+def comparison_payload(root):
     payload = json.loads((root / 'comparison.json').read_text(encoding='utf-8'))
     if payload['status'] != 'completed' or payload['comparison_version'] != 'qfs-compare-v2-stage1.0':
         raise ValueError('browse: require supported completed comparison')
     order = [(s, m) for s, _, _ in SCENARIOS for m, _ in MEMBERS]
     if [(m['scenario'], m['member']) for m in payload['members']] != order:
         raise ValueError('browse: incomplete or reordered member/scenario list')
-    check_files(root, payload['artifact_sha256'])
+    check_hash_manifest(root, payload.get('artifact_sha256'), COMPARISON_HASH_FILES)
+    for member in payload['members']:
+        relative = f"reports/{member['scenario']}/{member['member']}"
+        if member['raw_report'] != relative:
+            raise ValueError('browse: invalid hash manifest raw report path')
+        check_hash_manifest(inside(root, relative), member.get('artifact_sha256'), RAW_FILES)
+    return payload
+
+
+def comparison_view(root, label):
+    # Preflight every member before comparing any file digest, including outer
+    # digests which could otherwise mask a missing nested manifest entry.
+    payload = comparison_payload(root)
+    order = [(s, m) for s, _, _ in SCENARIOS for m, _ in MEMBERS]
+    check_files(root, payload.get('artifact_sha256'), COMPARISON_HASH_FILES)
     full = pd.read_csv(root / 'comparison.csv', float_precision='round_trip')
     if list(zip(full.scenario, full.member)) != order:
         raise ValueError('browse: comparison CSV order disagrees')
@@ -72,7 +109,7 @@ def comparison_view(root, label):
     members = []
     for i, member in enumerate(payload['members']):
         raw = inside(root, member['raw_report'])
-        check_files(raw, member['artifact_sha256'])
+        check_files(raw, member.get('artifact_sha256'), RAW_FILES)
         summary = json.loads((raw / 'summary.json').read_text(encoding='utf-8'))
         if member['summary'] != summary or summary['config'] != member['config'] or summary['status'] != 'completed':
             raise ValueError('browse: original summary/config disagrees')
@@ -108,7 +145,21 @@ def load_view(run):
         study = json.loads((root / 'study.json').read_text(encoding='utf-8'))
         if study['status'] != 'completed' or study['study_version'] != 'qfs-study-v2-stage2.0':
             raise ValueError('browse: require supported completed study')
-        check_files(root, study['artifact_sha256'])
+        labels = [f'window-{i+1:02d}' for i in range(len(study['windows']))]
+        if not 1 <= len(labels) <= 4 or [w['label'] for w in study['windows']] != labels:
+            raise ValueError('browse: invalid hash manifest study window paths')
+        required = {'study.csv', 'report.md'} | {
+            f'windows/{label}/{name}' for label in labels for name in COMPARISON_FILES
+        }
+        check_hash_manifest(root, study.get('artifact_sha256'), required)
+        for record in study['windows']:
+            relative = f"windows/{record['label']}"
+            if record['comparison_path'] != relative:
+                raise ValueError('browse: invalid hash manifest window report path')
+            child = inside(root, relative)
+            check_hash_manifest(child, record.get('artifact_sha256'), COMPARISON_FILES)
+            comparison_payload(child)
+        check_files(root, study.get('artifact_sha256'), required)
         if len(study['windows']) != len(study['config']['windows']) or len(study['rows']) != 12 * len(study['windows']):
             raise ValueError('browse: inconsistent study window/row counts')
         csv_rows = pd.read_csv(root / 'study.csv', float_precision='round_trip').to_dict('records')
@@ -122,7 +173,7 @@ def load_view(run):
             if any(record[k] != config[k] for k in ('label', 'start', 'end')):
                 raise ValueError('browse: study window metadata disagrees')
             child = inside(root, record['comparison_path'])
-            check_files(child, record['artifact_sha256'])
+            check_files(child, record.get('artifact_sha256'), COMPARISON_FILES)
             view = comparison_view(child, record['label'])
             if any(view['config'][k] != config[k] for k in ('start', 'end', 'data', 'data_source')):
                 raise ValueError('browse: study/comparison config disagrees')

@@ -1,5 +1,28 @@
 # V1 / V2 验收记录
 
+## HTML哈希清单完整性补修（基线7355eb2）
+
+本轮仅补修browse完整性校验，基线 `7355eb25b2a438af779d5bd19c5f6ac049b5e4a3` 已由用户授权推送。初始main及旧QuantForge工作区干净；无新功能/依赖/数据准备或策略重跑，保留全部269测试、V1/Funding/财务口径和compare/study原52/211产物。新修复仅本地提交，不自动推送。
+
+### 失败回归与修复
+
+先添加公开CLI回归：删去首成员artifact_sha256的equity.csv，仅修改曲线中间权益为1，保留首尾与所有仍声明的哈希及行情。修复前 qfs browse 返回0并发布HTML，曲线回撤明显大于原maximum_drawdown；回归确实在成功发布断言处失败。测试初稿曾误用max_drawdown字段，按实际summary字段maximum_drawdown纠正后才取得有效失败证据，不将初稿字段错误冒充缺陷复现。
+
+根因是check_files只遍历已给条目，没有验证其覆盖集合。现按已支持版本和固定目录推导必需清单，不从输入清单/当前磁盘文件猜覆盖：comparison自身的comparison.csv/periods.csv/report.md三项；每个固定成员summary.json/trades.csv/equity.csv/manifest.json四项；study窗口完整52项；study顶层study.csv/report.md两项＋每窗口52项。JSON本身只在父层有摘要，不要求自哈希。各清单必须是精确固定路径集合的对象，空/缺失/非对象/缺必需项/额外路径拒绝；摘要必须是64位小写十六进制字符串，null/bool/数值/错长/非hex/尾换行/数组等拒绝。成员/窗口链接也必须指向版本定义的固定目录，不能以别名绕开清单。
+
+自审补充了一条先失败再修的校验顺序回归：在study后窗成员删equity哈希并改中间权益，保留外层曲线旧摘要。初修会先报旧外层hash mismatch，未能明确指出内层缺项。最终分两阶段：遍历所有窗口/comparison/成员清单，先检查覆盖与摘要格式，然后核对文件摘要与原复制值；完整性错误明确含hash manifest及缺失路径。没有重建/补齐声明摘要，没有用独立核账代替校验；读取前后实际SHA快照仅用于并发修改检测和来源展示，不作为缺失清单的替代。所有失败在发布前终止，无HTML或.qfs-browse-*临时残留。
+
+新增47项回归覆盖主要篡改、其他各必需项、空/非法类型/非法摘要、study四层与后窗嵌套缺项（包括清单字段本身被删）、旧外层摘要遮蔽边界、合法完整两窗study正常/字节确定性/原报告不变。study用既有真实长度合成网格生成，不mock引擎，不作为历史表现。除最初主缺陷和后续顺序回归的现场red→green外，扩展用例还在隔离的7355eb2代码快照下复核：45失败、1合法导出通过（当时46项）；快照/失败日志在.local，未reset工作区。嵌套测试按需同步仍声明的父层JSON摘要以消除旧摘要混淆，只修改测试副本，不代表生产修复会重建清单。
+
+### 验证与边界
+
+- 锁定 `uv sync --locked --extra test`；全套 **316 passed / 0 failed / 0 skipped**（269原有＋47新增），528.68秒；src/tools/tests编译、qfs/browse CLI/help、diff检查通过。源改动仅browse.py，生产执行/账户/指标/Funding/选择/比较/study写入代码、HTML模板及uv.lock未变。
+- 离线wheel构建到 `.local/browse-hash-fix/dist`；实际从wheel加载qfs CLI和内置模板，合法报告导出成功，缺equity哈希返回1并明确hash manifest/equity.csv，无失败输出或临时文件。验证不局限于editable安装。
+- 只读复核原study两树 `study-g5jo08cs` / `study-6hsj7a9v`（各211文件）、原2月 `compare-aaadgj0m` 和本轮前已存准备输入比较 `compare-7hi8o5v_`（各52文件）。四树均与原独立核账证据SHA完全相同，浏览完整性/复制值检查及新目录导出通过；同源study/准备比较HTML还与基线交付HTML字节完全相同。新页面与保全记录在 `.local/browse-hash-fix/real-check/`，全套测试日志为 `.local/browse-hash-fix/full-tests.txt`，未覆盖历史证据、未新增独立账本核验或真实策略重复性声明。
+- 基线CI [38272646398](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38272646398) 首查in_progress，最终API确认headSha=7355eb25b2a438af779d5bd19c5f6ac049b5e4a3、completed/success；不能把它称为本轮尚未推送修复的远端CI。
+
+限制：仅支持既有comparison/study报告版本与固定结构，未来版本需显式适配；SHA与自报清单不是来源签名，不能阻止攻击者同时一致改写全部报告和摘要，不证明财务正确性，独立核账仍独立存在。本轮不扩展到账本检查/新UI/优化，不改变图形采样或任何指标；合法HTML字节未变，因此未另声称新增浏览器视觉验收。全部历史仍已见，旧仓库只读且保持原HEAD/干净状态；行情、报告、HTML、本机配置和.local证据不提交。提交SHA以Git记录为准，不在管理其自身的文档内自引用。
+
 ## 独立数据准备与离线浏览（基线 a335702，本轮完成）
 
 用户授权本轮自主实现/测试/审查/修复/分阶段本地提交，不自动推送。初始工作区干净；先补充既有V2_SPEC第8节及AGENTS授权范围，保持V1、Funding、245既有测试、年化溢出与study扫描完整性和默认产物契约。旧QuantForge只读。基线CI [38266056056](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38266056056) 初查in_progress，后API确认headSha=a335702、completed/success；这不是尚未推送新代码的远端CI。
