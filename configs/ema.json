@@ -1,0 +1,24 @@
+{
+  "strategy": {"name": "ema", "params": {"fast": 20, "slow": 50}},
+  "symbol": "BTCUSDT",
+  "start": "2020-02-01T00:00:00Z",
+  "end": "2020-03-01T00:00:00Z",
+  "data": {
+    "bars_4h": "../data/binance-2020-02/bars_4h.parquet",
+    "trade_1m": "../data/binance-2020-02/trade_1m.parquet",
+    "mark_1m": "../data/binance-2020-02/mark_1m.parquet",
+    "funding": "../data/binance-2020-02/funding.parquet"
+  },
+  "initial_equity": 10000,
+  "position_fraction": 0.50,
+  "maximum_leverage": 1.0,
+  "taker_fee_rate": 0.0005,
+  "slippage_rate": 0.0005,
+  "output_dir": "../runs",
+  "data_source": {
+    "description": "Binance public archives via local QuantForge schema-7 conversion; see data/binance-2020-02/provenance.json",
+    "official_source": "https://data.binance.vision/",
+    "independent_out_of_sample": false,
+    "dataset_identity_sha256": "e8510e8a3f00fd5d1f9bfd51a331a02c4e2c934b81717acc3e3a53d3870ee21b"
+  }
+}
