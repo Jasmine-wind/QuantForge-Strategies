@@ -1,0 +1,63 @@
+{
+  "symbol": "BTCUSDT",
+  "initial_equity": 10000,
+  "position_fraction": 0.5,
+  "maximum_leverage": 1.0,
+  "taker_fee_rate": 0.0005,
+  "slippage_rate": 0.0005,
+  "output_dir": "../runs",
+  "selection_evidence": {
+    "path": "../.local/v2-study-selection.json",
+    "sha256": "REPLACE_WITH_SHA256_OF_PRE_SAVED_DATA_ONLY_SELECTION"
+  },
+  "windows": [
+    {
+      "label": "window-01", "start": "2020-02-01T00:00:00Z", "end": "2020-08-01T00:00:00Z",
+      "data": {
+        "bars_4h": "../data/study-window-01-ms/bars_4h.parquet",
+        "trade_1m": "../data/study-window-01-ms/trade_1m.parquet",
+        "mark_1m": "../data/study-window-01-ms/mark_1m.parquet",
+        "funding": "../data/study-window-01-ms/funding.parquet"
+      },
+      "data_source": {"description": "Inject full local verified native-ms provenance before study",
+        "dataset_identity_sha256": "e8510e8a3f00fd5d1f9bfd51a331a02c4e2c934b81717acc3e3a53d3870ee21b",
+        "independent_out_of_sample": false}
+    },
+    {
+      "label": "window-02", "start": "2021-08-01T00:00:00Z", "end": "2022-02-01T00:00:00Z",
+      "data": {
+        "bars_4h": "../data/study-window-02-ms/bars_4h.parquet",
+        "trade_1m": "../data/study-window-02-ms/trade_1m.parquet",
+        "mark_1m": "../data/study-window-02-ms/mark_1m.parquet",
+        "funding": "../data/study-window-02-ms/funding.parquet"
+      },
+      "data_source": {"description": "Inject full local verified native-ms provenance before study",
+        "dataset_identity_sha256": "e8510e8a3f00fd5d1f9bfd51a331a02c4e2c934b81717acc3e3a53d3870ee21b",
+        "independent_out_of_sample": false}
+    },
+    {
+      "label": "window-03", "start": "2023-03-01T00:00:00Z", "end": "2023-09-01T00:00:00Z",
+      "data": {
+        "bars_4h": "../data/study-window-03-ms/bars_4h.parquet",
+        "trade_1m": "../data/study-window-03-ms/trade_1m.parquet",
+        "mark_1m": "../data/study-window-03-ms/mark_1m.parquet",
+        "funding": "../data/study-window-03-ms/funding.parquet"
+      },
+      "data_source": {"description": "Inject full local verified native-ms provenance before study",
+        "dataset_identity_sha256": "e8510e8a3f00fd5d1f9bfd51a331a02c4e2c934b81717acc3e3a53d3870ee21b",
+        "independent_out_of_sample": false}
+    },
+    {
+      "label": "window-04", "start": "2023-09-01T00:00:00Z", "end": "2024-03-01T00:00:00Z",
+      "data": {
+        "bars_4h": "../data/study-window-04-ms/bars_4h.parquet",
+        "trade_1m": "../data/study-window-04-ms/trade_1m.parquet",
+        "mark_1m": "../data/study-window-04-ms/mark_1m.parquet",
+        "funding": "../data/study-window-04-ms/funding.parquet"
+      },
+      "data_source": {"description": "Inject full local verified native-ms provenance before study",
+        "dataset_identity_sha256": "e8510e8a3f00fd5d1f9bfd51a331a02c4e2c934b81717acc3e3a53d3870ee21b",
+        "independent_out_of_sample": false}
+    }
+  ]
+}

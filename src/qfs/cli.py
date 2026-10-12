@@ -7,6 +7,7 @@ from .config import Config
 from .data import load_data
 from .engine import run_backtest
 from .report import write_reports
+from .study import StudyConfig, run_study
 
 
 def main(argv=None):
@@ -16,8 +17,14 @@ def main(argv=None):
     backtest.add_argument("--config", required=True)
     compare = sub.add_parser("compare", help="Compare four fixed members and three cost scenarios offline")
     compare.add_argument("--config", required=True)
+    study = sub.add_parser("study", help="Run fixed nonoverlapping six-month exploratory windows offline")
+    study.add_argument("--config", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "study":
+            output = run_study(StudyConfig.load(args.config))
+            print(output)
+            return 0
         if args.command == "compare":
             output = run_comparison(load_compare_config(args.config))
             print(output)

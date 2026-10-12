@@ -66,6 +66,36 @@ PY
 
 旧数据依旧已见；所有结果仅为探索性历史比较 / 分期验证，既无独立 OOS，也不证明盈利。最小 GitHub Actions 使用 uv.lock + 固定合成正确性 fixtures，不需要本机行情；尚未推送的新工作不能声称远端 CI 已执行。
 
+## V2 第二阶段：固定策略多窗口 study
+
+```bash
+.venv/bin/qfs study --config configs/study.json
+```
+
+先按纯数据质量规则选窗口，再运行策略：最早连续6个合格完整UTC月、选定后从结束月继续，缺口打断、不拼接；最多最早4个、不因收益差而替换。少于4个保存实际数量和原因，不缩短凑数；少于2个明确多窗口真实验证不足。默认12月选择及 `compare` 保持兼容。实际已选窗口见 `docs/DATA_AUDIT.md`。
+
+配置 [`configs/study.json`](configs/study.json) 是**准备模板**：先创建自己的选择记录及SHA，替换占位哈希、核对所选全部窗口并注入完整本机provenance，再保存到新的本机配置路径；不能直接将占位配置视为已核验数据。公共资金/仓位/成本字段只在顶层定义，每窗口只有label/start/end/data/data_source。重叠、错序、非6完整月、重复/不安全标签、公共假设覆盖或与选择记录不一致均拒绝，不能手选子集。
+
+```bash
+# 只读质量检查，无策略计算；输出要求不存在的新路径
+.venv/bin/python tools/select_comparison_window.py --mode study \
+  --dataset ../QuantForge/data/versions/e8510e8a3f00fd5d \
+  --raw-root ../QuantForge/data/raw/binance --output .local/v2-study-selection.json
+# 计算该记录SHA；按其windows逐个用原import_quantforge转换到新的目录
+# 配置selection_evidence.path/sha256与完整窗口来源后执行
+.venv/bin/qfs study --config .local/v2-study.json
+.venv/bin/python tools/verify_study.py --config .local/v2-study.json \
+  --output .local/v2-study-verification.json
+```
+
+每个窗口都是独立实验，使用相同初始权益；窗口内部沿用完整4成员×3成本场景、连续账户和月/年分期。没有合并账户、拼接收益、连续净值或跨窗口年化，也不把几个窗口当作独立统计样本。
+
+`runs/study-*` 内有 `study.json`、`study.csv`、`report.md` 及 `windows/<label>/` 的52文件完整comparison。顶层保留全部逐窗口指标和同窗口同场景相对现金/永续基准的**收益差（百分点 = 100×收益率之差）**，固定顺序展示，不排名/淘汰。完整配置、预先选择证据、数据/代码/依赖版本及原报告相对链接/哈希都记录。整个study只有一次原子发布，后续窗口失败也清理全部私有staging，不发布成功子集。
+
+独立 `verify_study.py` 复用已验收账本核验器，逐窗口核对交易、分钟权益、分期、年化null及顶层指标/百分点差/哈希；`--config` 完整运行两次并逐文件比较，`--run` 仅核账已有目录、不声称重复性。测试使用完整6个月合成分钟网格，不mock账户/引擎，CI无真实行情依赖；全套运行约数分钟。
+
+当前实际4窗为 `[2020-02,2020-08)`、`[2021-08,2022-02)`、`[2023-03,2023-09)`、`[2023-09,2024-03)` UTC。第一窗包含原2020-02，后两窗拆分原366天区间；全部仍是旧已见历史，不是独立OOS或盈利证明。
+
 ## 数据与配置
 
 每个 Parquet 一行一个事件；时间可为带时区的 datetime 或可解析的 ISO 字符串，转换为 UTC；无时区时间明确按 UTC 处理。**不接受无单位的数字 epoch**。必须已经严格递增，无重复。规范化列：

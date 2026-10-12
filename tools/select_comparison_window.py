@@ -1,6 +1,7 @@
 """Data-only, read-only selection under docs/V2_SPEC.md; no strategy results.
 
-Earliest 12 complete consecutive UTC months, otherwise earliest longest block.
+Default: earliest 12 complete months, otherwise earliest longest block.
+Study: earliest four nonoverlapping six-month windows, no short-block fallback.
 """
 import argparse
 from pathlib import Path
@@ -13,6 +14,7 @@ from qfs.data import sha256, validate_frame, require_grid
 from qfs.funding import VERIFIED_START, VERIFIED_END, MAX_DELAY, validate_funding_schedule
 from qfs.import_quantforge import verified_manifest, checked_mark_zip
 from qfs.report import write_json
+from qfs.study import STUDY_POLICY, choose_study_windows
 
 
 MAX_MONTHS = 12
@@ -39,7 +41,9 @@ def choose_window(rows):
     return {'start': best[0]['start'], 'end': best[-1]['end'], 'months': len(best)}
 
 
-def audit(dataset, raw_root):
+def audit(dataset, raw_root, mode='compare'):
+    if mode not in {'compare', 'study'}:
+        raise ValueError('unknown selection mode')
     dataset, raw_root = Path(dataset).resolve(), Path(raw_root).resolve()
     manifest = verified_manifest(dataset)
     paths = {key: dataset / f'{key}.csv' for key in ('decision_4h', 'path_1m', 'funding')}
@@ -137,13 +141,13 @@ def audit(dataset, raw_root):
         inspected.append(state)
         print(left.strftime('%Y-%m'), 'complete' if state['valid'] else 'EXCLUDED: ' + '; '.join(state['errors']), flush=True)
         consecutive = consecutive + 1 if state['valid'] else 0
-        if consecutive == MAX_MONTHS:
-            break  # earliest possible 12-month block found; no returns inspected
+        if (mode == 'compare' and consecutive == MAX_MONTHS) or (mode == 'study' and len(choose_study_windows(inspected)) == 4):
+            break  # fixed earliest windows found; never inspect strategy results
     for key, path in paths.items():
         if sha256(path) != manifest['files'][key]['sha256']:
             raise ValueError(f'{path}: canonical input changed during audit')
     selected = choose_window(inspected)
-    return {'policy': 'V2_SPEC.md: earliest 12 consecutive complete UTC months; fallback earliest longest, max12',
+    result = {'policy': 'V2_SPEC.md: earliest 12 consecutive complete UTC months; fallback earliest longest, max12',
             'dataset_identity_sha256': manifest['sha256'], 'source_coverage': coverage,
             'audited_funding_scope': {'start': VERIFIED_START.isoformat(), 'end': VERIFIED_END.isoformat()},
             'canonical_files': {k: {'path': str(p), 'sha256': sha256(p)} for k, p in paths.items()},
@@ -151,6 +155,14 @@ def audit(dataset, raw_root):
             'selection_status': 'longer_interval_available' if selected and selected['months'] >= 2 else 'long_validation_unavailable',
             'uninspected': 'months after earliest 12-month block, if found; partial months and periods outside audited Funding scope',
             'independent_out_of_sample': False, 'strategy_results_used': False}
+    if mode == 'study':
+        windows = choose_study_windows(inspected)
+        result.update(mode='study', policy=STUDY_POLICY, windows=windows, selected=None,
+                      selection_status='complete_4_windows' if len(windows) == 4 else 'insufficient_windows',
+                      multiwindow_validation_available=len(windows) >= 2,
+                      stop_reason='earliest four found' if len(windows) == 4 else 'audited complete-month coverage exhausted; no shortened windows',
+                      uninspected='months after fourth window if found; partial months and outside audited Funding scope')
+    return result
 
 
 def main():
@@ -158,14 +170,15 @@ def main():
     parser.add_argument('--dataset', required=True)
     parser.add_argument('--raw-root', required=True)
     parser.add_argument('--output', required=True, help='New audit JSON outside read-only source trees')
+    parser.add_argument('--mode', choices=('compare', 'study'), default='compare')
     args = parser.parse_args()
     output = Path(args.output).resolve()
     if output.exists() or any(output.is_relative_to(Path(p).resolve()) for p in (args.dataset, args.raw_root)):
         parser.error('output must be new and outside source trees')
-    result = audit(args.dataset, args.raw_root)
+    result = audit(args.dataset, args.raw_root, args.mode)
     output.parent.mkdir(parents=True, exist_ok=True)
     write_json(output, result)
-    print('SELECTED:', result['selected'], '=>', output)
+    print('SELECTED:', result.get('windows', result['selected']), '=>', output)
 
 
 if __name__ == '__main__':

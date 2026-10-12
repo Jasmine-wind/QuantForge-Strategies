@@ -86,14 +86,18 @@ def markdown_report(shared, full_rows, periods):
     return "\n".join(lines)
 
 
-def run_comparison(shared):
-    # Require the fixed EMA preload, regardless of a programmatic caller's strategy.
-    shared = Config.from_dict(shared.as_dict() | {"strategy": MEMBERS[0][1]})
+def write_comparison(shared, data, directory):
+    """Run/write into a caller-owned empty private directory; never publish.
+
+    The caller validates the fixed EMA preload via load_data before this seam.
+    Stable effective config paths are independent of the private destination.
+    """
     configs = member_configs(shared)
     identity = code_identity()
-    data = load_data(shared)
-    shared.output_dir.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".qfs-compare-", dir=shared.output_dir))
+    staging = Path(directory)
+    staging.mkdir(parents=True, exist_ok=True)
+    if any(staging.iterdir()):
+        raise ValueError(f"{staging}: comparison destination must be empty")
     full_rows, periods, members = [], [], []
     try:
         for scenario, member, config in configs:
@@ -141,9 +145,25 @@ def run_comparison(shared):
         (staging / "report.md").write_text(markdown_report(shared, full_rows, periods), encoding="utf-8", newline="\n")
         comparison["artifact_sha256"] = {f: sha256(staging / f) for f in ("comparison.csv", "periods.csv", "report.md")}
         write_json(staging / "comparison.json", comparison)
+        return comparison
+    except BaseException:
+        shutil.rmtree(staging)
+        raise
+
+
+def run_comparison(shared):
+    # Preserve standalone fail-before-output validation and the fixed EMA preload.
+    shared = Config.from_dict(shared.as_dict() | {"strategy": MEMBERS[0][1]})
+    member_configs(shared)
+    data = load_data(shared)
+    shared.output_dir.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".qfs-compare-", dir=shared.output_dir))
+    try:
+        write_comparison(shared, data, staging)
         output = staging.with_name("compare-" + staging.name.removeprefix(".qfs-compare-"))
         staging.rename(output)
         return output
     except BaseException:
-        shutil.rmtree(staging)
+        if staging.exists():
+            shutil.rmtree(staging)
         raise
