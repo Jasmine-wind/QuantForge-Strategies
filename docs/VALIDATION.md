@@ -1,5 +1,26 @@
 # V1 / V2 验收记录
 
+## V2 第二阶段选择证据完整性补修（基线 e492f0f）
+
+本轮从 `e492f0f24116bb0a41ddb10443686c8ad2f18962` 干净工作区开始，只修生产配置和独立核账的月度扫描完整性。没有改变策略/账户/成本/指标、已验Funding范围、第一阶段12月选择或四窗选择规则；没有新增依赖、功能或文档体系。本轮仅本地提交，不自动推送，由用户最终验收。
+
+### 失败回归 → 修复
+
+先新增 `tests/test_study_evidence.py` 的4个失败回归：将两窗证据截为首窗的连续月前缀，同时减少证据windows和配置windows、重算SHA，保留声明覆盖结束点及“扫描耗尽”说明。旧 `StudyConfig.load` 和独立 `selected_from_months` 均未拒绝；公开study CLI进入行情读取后才因缺分钟失败，独立核账CLI进入后续报告字段读取。测试要求失败必须来自月度证据完整性，不能依靠旧哈希、行情缺失或缺报告。4项修复前确实失败，修复后通过。
+
+生产端独立于停止说明，从source_coverage与固定Funding范围交集计算首个完整UTC月的起点（下界向上取月首）和最后完整UTC月的结束点（上界向下取月首）。月证据必须从规定起点连续覆盖，不能越过完整月范围；重新计算最早窗口后，若不足4窗，实际扫描结束必须等于最后完整月结束，否则报 `incomplete complete-month scan`。找到最早4窗后仍允许提前停止，不以声称的窗口数量、stop_reason或SHA代替完成性判断。
+
+独立核账只复用既定Funding范围常量，自行枚举交集内完整UTC月、验证证据是从首月开始的连续前缀，再用原独立6月规则计算窗口；不足4窗须覆盖全部枚举月份。没有导入/调用生产study选择器、配置校验器或引擎来替代验证。边界回归还发现初次枚举会保留来源下界的非午夜时分/纳秒，先失败后改为从UTC月首午夜枚举并按实际上下界过滤，避免把部分月误当完整月。
+
+### 验证
+
+- 全套 **245 passed、0 failed、0 skipped**，原228测试全部保留；新增17项覆盖同步截短拒绝、两类CLI失败原因、完整扫描但仅1/2/3窗接受、最早4窗提前停止接受、漏首月/中间月、Funding前月份/尾部部分月拒绝，以及源首尾部分月、±1ns、UTC时区换算、Funding首尾截断。
+- `uv sync --locked --extra test`、编译src/tools/tests、qfs及study CLI/help、核账CLI/help、`git diff --check`通过；uv.lock与第一阶段选择工具未变。
+- `StudyConfig.load('.local/v2-study.json')`仍接受原最早4窗及原选择SHA。只读复核 `runs/study-g5jo08cs` 全部4窗48组交易、分钟权益、分期、年化null和顶层汇总/差值；新证据为 `.local/v2-study-evidence-fix-verification.json`，未覆盖旧证据。
+- 复核前后 `runs/study-g5jo08cs`、`runs/study-6hsj7a9v` 各211文件SHA树均与旧证据完全一致；原12月选择JSON保持字节相同。快照另存 `.local/v2-study-evidence-fix-report-snapshots.json`。本轮**未重跑真实策略或新增真实重复性验证**，新核账记录明确repeatability未检查；历史重复性事实仍来自原轮。
+
+限制：这里只验证已记录source_coverage和月度质量证据的日历完整性，不重新扫描原始行情或证明所有来源声明可信；SHA不是质量/预存时间的独立证明。原全部已见历史与执行近似限制不变。旧仓库只读，无行情/报告/本机配置进入提交，无自动推送。
+
 ## V2 第二阶段：固定多窗口验证（基线 e280dba）
 
 从已推送 `e280dba9897680d6271e86e0ba9e39591222c75d` 的干净main开始，保留修改、不reset，旧QuantForge只读。初始fetch/CI查询出现连接/TLS错误；随后fetch成功确认远端无新代码，CI API复核 [Offline tests run 38252438955](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38252438955) 的headSha及completed/success。本阶段只本地提交，不把基线CI成功当作新提交CI已运行。

@@ -8,6 +8,7 @@ import sys
 import pandas as pd
 
 from qfs.data import sha256
+from qfs.funding import VERIFIED_START, VERIFIED_END
 from ledger import close
 from verify_comparison import verify as verify_comparison
 
@@ -18,6 +19,18 @@ def selected_from_months(proof):
     assert proof['independent_out_of_sample'] is False
     assert proof['policy'] == {'window_months': 6, 'maximum_windows': 4,
            'selection': 'earliest consecutive qualified UTC months, nonoverlapping; gaps reset candidates'}
+    coverage = proof['source_coverage']
+    lower = max(pd.Timestamp(coverage['start_utc_inclusive']).tz_convert('UTC'), VERIFIED_START)
+    upper = min(pd.Timestamp(coverage['end_utc_exclusive']).tz_convert('UTC'), VERIFIED_END)
+    # Enumerate full calendar months independently, not via StudyConfig/selector.
+    required = [t for t in pd.date_range(lower.normalize().replace(day=1), upper, freq='MS', inclusive='left')
+                if t >= lower and t + pd.DateOffset(months=1) <= upper]
+    assert required, 'source/Funding intersection has no complete UTC month'
+    inspected = [pd.Timestamp(r['start']).tz_convert('UTC') for r in proof['months']]
+    assert inspected == required[:len(inspected)], 'missing/out-of-range inspected month evidence'
+    for row, start in zip(proof['months'], inspected):
+        assert pd.Timestamp(row['end']).tz_convert('UTC') == start + pd.DateOffset(months=1)
+        assert type(row['valid']) is bool and row['valid'] == (not row['errors'])
     windows, block = [], []
     previous = None
     for row in proof['months']:
@@ -37,6 +50,10 @@ def selected_from_months(proof):
             block = []
             if len(windows) == 4:
                 break
+    if len(windows) < 4:
+        assert len(inspected) == len(required), (
+            f'incomplete complete-month scan; expected through '
+            f'{(required[-1] + pd.DateOffset(months=1)).isoformat()}')
     assert windows == proof['windows']
     return windows
 

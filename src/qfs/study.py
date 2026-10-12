@@ -82,14 +82,21 @@ class StudyConfig:
             first_month = first.normalize().replace(day=1)
             if first_month < first:
                 first_month += pd.offsets.MonthBegin(1)
+            last = min(utc(coverage['end_utc_exclusive']), VERIFIED_END)
+            last_month_end = last.normalize().replace(day=1)
+            if first_month >= last_month_end:
+                raise ValueError('study: source/Funding intersection has no complete UTC month')
             previous = first_month
             for row in rows:
                 if utc(row['start']) != previous or row['valid'] != (not row['errors']):
                     raise ValueError('study: missing/contradictory inspected month evidence')
                 previous = utc(row['end'])
-            if previous > min(utc(coverage['end_utc_exclusive']), VERIFIED_END):
+            if previous > last_month_end:
                 raise ValueError('study: evidence exceeds audited complete-month coverage')
             expected = choose_study_windows(rows)
+            if len(expected) < 4 and previous != last_month_end:
+                raise ValueError(f'study: incomplete complete-month scan; expected through '
+                                 f'{last_month_end.isoformat()}, inspected through {previous.isoformat()}')
         except (KeyError, TypeError) as exc:
             raise ValueError(f'study: incomplete selection evidence: {exc}') from exc
         if not expected or evidence.get('windows') != expected:
