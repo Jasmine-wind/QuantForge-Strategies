@@ -5,6 +5,7 @@ from pathlib import Path
 import zipfile
 
 from .compare import load_compare_config, run_comparison
+from .browse import export_html
 from .config import Config
 from .data import load_data
 from .engine import run_backtest
@@ -25,8 +26,14 @@ def main(argv=None):
     preparation = sub.add_parser('prepare', help='Prepare checked official monthly archives offline')
     for name in ('manifest', 'start', 'end', 'output'):
         preparation.add_argument('--' + name, required=True)
+    browser = sub.add_parser('browse', help='Export standalone offline HTML from existing reports')
+    browser.add_argument('--run', required=True)
+    browser.add_argument('--output', required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == 'browse':
+            print(export_html(args.run, args.output))
+            return 0
         if args.command == 'prepare':
             prepare(args.manifest, args.output, args.start, args.end)
             print(Path(args.output).resolve())

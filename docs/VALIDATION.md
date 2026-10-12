@@ -1,6 +1,6 @@
 # V1 / V2 验收记录
 
-## 独立数据准备与离线浏览（基线 a335702，本轮持续记录）
+## 独立数据准备与离线浏览（基线 a335702，本轮完成）
 
 用户授权本轮自主实现/测试/审查/修复/分阶段本地提交，不自动推送。初始工作区干净；先补充既有V2_SPEC第8节及AGENTS授权范围，保持V1、Funding、245既有测试、年化溢出与study扫描完整性和默认产物契约。旧QuantForge只读。基线CI [38266056056](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38266056056) 初查in_progress，后API确认headSha=a335702、completed/success；这不是尚未推送新代码的远端CI。
 
@@ -8,13 +8,31 @@
 
 新增小型 `prepare.py` 与 `qfs prepare`，显式manifest无需canonical或旧代码，复用validate_frame/require_grid/load_data及既定Funding政策。240完整分钟OHLC/Decimal volume聚合150根预热；整数ms和实际分钟Mark Open含边界证据；5文件原子发布、禁止覆盖/源内写入，来源SHA与CHECKSUM在发布前再次校验。规范文件路径记录为bundle内相对路径，不受输出目录名影响。
 
-先写公开prepare接口失败回归（模块尚不存在），实现后新增15个准备测试：原序/预热/Decimal volume/47ms/Mark/loader、5文件重复、错误URL/SHA/CHECKSUM文件名/CSV member、warm缺口/重复/乱序/无效OHLC/close_time、非整数/48ms Funding、缺Mark，以及CLI/文件系统失败staging清理。全部15通过；既有245测试留待本轮最终全套再次运行。合成存档只用于正确性。
+先写公开prepare接口失败回归（模块尚不存在），实现后新增15个准备测试：原序/预热/Decimal volume/47ms/Mark/loader、5文件重复、错误URL/SHA/CHECKSUM文件名/CSV member、warm缺口/重复/乱序/无效OHLC/close_time、非整数/48ms Funding、缺Mark，以及CLI/文件系统失败staging清理。全部15通过；既有245测试在本轮最终全套运行中全部通过。合成存档只用于正确性。
 
 真实准备先2月，再6月window-01（2020-02～08），读取本机已核验官方ZIP/CHECKSUM，不用网络或canonical运行路径。新输入与旧四类时间/数值逐列精确相同；发现合约和4H的Parquet时间物理单位ms/us差异，经精确UTC时刻比较和下述金融字节对照证明无行为差异，不为匹配物理编码改策略/引擎。每组4成员×3成本的完整财务指标和24份交易/权益CSV与原输入报告完全相同，periods.csv也相同。每区间新的比较重复两次，52/52文件一致，全部交易、分钟状态、分期、年化null独立核账通过。准备重复各5/5文件一致。
 
 实际位置：`data/official-feb`、`data/official-six`，重复各`-repeat`；新比较 `runs/compare-7hi8o5v_` / `compare-6qe4xhey`（2月）、`runs/compare-l1rttnce` / `compare-dji53bpy`（六个月）；新证据 `.local/official-{feb,six}-verification.json`，配置/清单 `.local/official-*-compare.json` / `raw-*-manifest.json`。这些均不提交。原 `compare-aaadgj0m` 与 `study-g5jo08cs/windows/window-01` 用于只读金融对照，未覆盖。
 
 自审修复：原始ZIP member/close_time/月身份必须与官方对象一致，不能只验HASH后按位置猜格式；全文件先校验、后切片，不能把外部重复/异常丢掉；volume保留Decimal避免float逐项求和差异；输出在发布前再次拒绝并发出现的目标。数据准备仍离线、仅固定已核验Funding范围，CHECKSUM/URL不伪称来源独立签名或新OOS。
+
+### 阶段二：独立离线HTML浏览
+
+新增 `browse.py`、单个内嵌模板 `browser.html` 和 `qfs browse --run ... --output ...`。只读原comparison/study（原52/211文件不变），无前端工程/运行依赖/服务器/在线字体或网络调用。检查支持版本、固定成员/场景、原文件SHA、summary/config、JSON/CSV复制值，显示准确窗口范围/来源/成本假设/限制；自包含HTML嵌入完整原指标/分期/百分点差及各窗口独立采样曲线。明确区分“报告完整性检查”与“独立核账”，没有在浏览代码重复交易/年化引擎。窗口不拼接、不排名。
+
+图形采样只压缩显示，每160桶保留首尾、权益min/max和完整曲线峰值回撤min/max，包含初态/终点；不根据采样重新计算原summary或月度指标。指标原始数值在嵌入JSON及title中保留，显示最多6位小数；表内月度数值仍来自原periods。现金平曲线/Sharpe null正常展示。source文本转义`<`避免闭合script，再用textContent显示，不注入任意HTML。临时文件与目标位于同一目录，独占hard-link发布避免并发覆盖；失败清理临时文件。
+
+先新增公开浏览接口失败回归（模块不存在），共9项浏览测试通过：全部12切换数据/原summary/period/首尾/原文件不变与HTML字节确定性；hash/CSV复制值/summary/缺成员/逃逸路径/空曲线拒绝；极值采样、恶意script文本转义、CLI及发布失败清理。包装配置仅增加HTML package-data，uv.lock及运行依赖不变；实际 `uv build --offline --wheel --out-dir .local/dist` 确认模板包含在wheel，非只验证editable环境。
+
+实际自包含HTML：`.local/html/official-feb-delivery.html` 和 `.local/html/study-delivery.html`（开发检查页保留`*-final.html`），来源分别是本轮2月新比较与此前已独立核账四窗study。另有不同新路径的重复HTML用于字节比对，不覆盖原页面。真实Chromium直接file://检查桌面1440×1000、小屏390×844，全部4×3×4=48切换、672个原指标title及月度标签与原JSON逐项严格相等；键盘选择、无页面水平溢出、0外部resource请求、控制台0错误/警告。浏览器工具初始禁止file://，通过本机显式配置启用本轮文件检查，不需要服务器。脚本/截图/工具记录在`.local`，不提交。
+
+UI自审为主线程审查（当前工具无独立子代理），不是外部设计审查；用户明确禁止新文档体系，设计约束记入既有规格及模板说明，无新增PRODUCT/DESIGN。机械检测工具因缺HTML解析模块降级regex并返回空列表，**不宣称完整CSS/对比度检测通过**。实际首轮截图发现小屏SVG固定viewBox使标签过小，改用容器宽度画布/日期短标签；对现金窄区间刻度保留小数避免重复零标签。桌面/小屏和数据交互已复核，不进行无限视觉调整。
+
+### 最终检查与交付边界
+
+锁定安装、全套 **269 passed / 0 failed / 0 skipped**（245既有＋15准备＋9浏览），编译src/tools/tests，qfs/prepare/browse CLI/help、diff检查及离线wheel构建通过。原Funding计划/毫秒顺序/年化null/study不足四窗扫描回归保留。第一阶段12月选择工具、执行/账户/指标生产代码没有修改；原报告/选择记录/输入不覆盖，最终SHA树另复核：两个原study各211文件及原2月52文件均与旧证据完全相同，12月选择JSON字节不变；交付HTML同源重复字节相同，保全记录 `.local/html/delivery-integrity.json`。交付页面又经file://全部48切换/672原指标检查通过，0外部resources。
+
+阶段一已本地提交 `7fb0418`；阶段二提交SHA由Git记录（不在受其管理文档硬编码自身SHA）。新工作未推送，不能把a335702的远端CI success算作新提交CI。全部本轮范围完成，等待用户最终验收；没有资源阻塞。本轮仅验证2月和window-01 raw准备，不宣称全范围准备完好；只支持BTCUSDT官方monthly与原已审计Funding范围，数据仍已见。导出HTML不能替代独立核账/保证来源真实性，未验证所有浏览器/OS，hard-link原子发布依赖目标文件系统支持。旧仓库只读；无行情、报告、HTML、本机配置、密钥或进度记录进入提交。
 
 ## V2 第二阶段选择证据完整性补修（基线 e492f0f）
 
