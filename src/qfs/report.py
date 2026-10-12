@@ -14,6 +14,7 @@ import pandas as pd
 from . import CONTRACT_VERSION
 from .config import Config
 from .engine import Result
+from .funding import funding_policy
 
 
 LIMITATIONS = [
@@ -21,7 +22,8 @@ LIMITATIONS = [
     "Synthetic fixtures verify correctness only and are never evidence of historical strategy profitability.",
     "1m open/terminal close market-fill approximation; constant adverse slippage and taker fees, no liquidity or queue model.",
     "No exchange quantity step, minimum notional, partial fills or complete margin/liquidation model; not live margin-risk accuracy.",
-    "Float64 arithmetic; funding coverage assumes BTCUSDT UTC 00/08/16 settlement buckets and preserves actual event timestamps.",
+    "Float64 arithmetic; Funding calendar is limited to audited [2020-01-01,2026-08-01) BTCUSDT UTC 00/08/16, fixed integer-ms delay [0,47]ms; actual timestamps are preserved.",
+    "Maximum drawdown is sampled at 1m Mark closes (plus initial and terminal settlement); intraminute Funding/price equity swings can be missed.",
 ]
 
 
@@ -69,13 +71,13 @@ def metric_summary(config: Config, result: Result):
         "average_holding_hours": float(trades.holding_hours.mean()) if len(trades) else None,
         "gross_pnl": total("gross_pnl"), "net_pnl": total("net_pnl"),
         "fees": total("fees"), "slippage_cost": total("slippage"), "funding_net": total("funding"),
-        "config": config.as_dict(), "limitations": LIMITATIONS,
+        "config": config.as_dict(), "limitations": LIMITATIONS, "funding_validation": funding_policy(),
         "metric_definitions": {
             "gross_pnl": "signed_quantity * (exit_fill - entry_fill); adverse slippage already included",
             "net_pnl": "gross_pnl - entry_fee - exit_fee + holding Funding; slippage is NOT deducted twice",
             "annualized_return": "(final_equity / initial_equity) ** (365 / calendar_days) - 1; non-positive, invalid run or overflow => null",
             "sharpe": "full UTC day boundary returns only; sample std ddof=1; sqrt(365), risk-free=0; <2 returns or zero std => null",
-            "maximum_drawdown": "max(1 - equity / running_peak), initial + every 1m Mark close + terminal settlement",
+            "maximum_drawdown": "max(1 - equity / running_peak), initial + every 1m Mark close + terminal settlement; intraminute event swings are not sampled",
             "equity_timestamps": "initial at start, completed minute at open_time+1m; optional terminal fill at end after last Mark snapshot",
         },
     }

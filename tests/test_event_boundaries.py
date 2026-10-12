@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from conftest import save
+from conftest import save, engine_data
 from qfs.data import load_data
 from qfs.engine import run_backtest
 
@@ -24,7 +24,7 @@ def test_missing_exact_signal_minute_cannot_seek_next_price(dataset):
 
 
 def test_end_excludes_same_time_signal_and_funding(dataset):
-    config, frames, _ = dataset(minutes=240, closes={150: 50})
+    config, frames, _ = dataset(minutes=480, closes={150: 110, 151: 50})
     frames["funding"] = pd.concat([frames["funding"], pd.DataFrame({
         "funding_time": [config.end], "funding_rate": [.1], "funding_mark_price": [100]})], ignore_index=True)
     save(config, frames)
@@ -66,8 +66,7 @@ def test_funding_after_delayed_short_entry_credits_short(dataset):
     frames["funding"] = pd.concat([frames["funding"], pd.DataFrame({
         "funding_time": [config.start + pd.Timedelta(minutes=241, milliseconds=47)],
         "funding_rate": [.01], "funding_mark_price": [120]})], ignore_index=True)
-    save(config, frames)
-    result = run_backtest(config, load_data(config))
+    result = run_backtest(config, engine_data(config, frames))
     assert result.trades.iloc[0].funding == 0
     assert result.trades.iloc[1].funding == 60
     assert result.equity.iloc[-1].equity == 10060

@@ -14,6 +14,7 @@ import pandas as pd
 
 from .config import Config, utc
 from .data import sha256, validate_frame, require_grid, load_data
+from .funding import VERIFIED_START, VERIFIED_END, MAX_DELAY, funding_policy
 from .report import write_json
 
 
@@ -77,13 +78,27 @@ def convert(dataset, raw_root, output, start, end):
         time_col = "funding_time_utc" if kind == "funding" else "open_time_utc"
         pieces = []
         for frame in pd.read_csv(path, dtype=str, chunksize=100000):
-            columns = ({time_col, "funding_rate", "mark_price", "mark_price_source"} if kind == "funding"
+            columns = ({time_col, "funding_time_ms", "funding_rate", "mark_price", "mark_price_source"} if kind == "funding"
                        else {time_col, "open", "high", "low", "close", "volume"})
             if columns - set(frame.columns):
                 raise ValueError(f"{path}: missing legacy columns {sorted(columns - set(frame.columns))}")
             times = pd.to_datetime(frame[time_col], utc=True, errors="raise")
-            lower = start if kind == "funding" else warm_start
-            frame = frame[(times >= lower) & (times < end)].copy()
+            lower, upper = warm_start, end
+            if kind == "funding":
+                if not frame.funding_time_ms.str.fullmatch(r"\d+").fillna(False).all():
+                    raise ValueError(f"{path}: funding_time_ms must be integer native epoch milliseconds")
+                actual = pd.to_datetime(frame.funding_time_ms.astype("int64"), unit="ms", utc=True)
+                bad = (times != actual) & (times != actual.dt.floor("s"))
+                if bad.any():
+                    i = bad[bad].index[0]
+                    raise ValueError(f"{path}: funding_time_utc display disagrees with native funding_time_ms; "
+                                     f"expected {actual.loc[i].isoformat()}, actual display {times.loc[i].isoformat()}")
+                # The legacy UTC display loses milliseconds. The native integer,
+                # NOT the display nor calendar matching, is execution authority.
+                frame[time_col], times = actual, actual
+                lower = max(start - MAX_DELAY, VERIFIED_START)
+                upper = min(end + MAX_DELAY + pd.Timedelta(nanoseconds=1), VERIFIED_END)
+            frame = frame[(times >= lower) & (times < upper)].copy()
             frame = frame.rename(columns={time_col: "funding_time" if kind == "funding" else "open_time",
                                           "mark_price": "funding_mark_price"})
             if kind == "funding":
@@ -119,7 +134,9 @@ def convert(dataset, raw_root, output, start, end):
                   "source_dataset": str(dataset), "dataset_identity_sha256": manifest["sha256"],
                   "source_manifest_file_sha256": sha256(dataset / "manifest.json"),
                   "original_dataset_coverage": manifest["request_range"], "source_files": source_files,
-                  "conversion": "UTC columns renamed; decimal prices converted to float64; no interpolation or price proxies",
+                  "conversion": "UTC columns renamed; decimal prices converted to float64; native funding_time_ms preserved (UTC display may truncate ms); no interpolation or price proxies",
+                  "funding_validation": funding_policy(),
+                  "funding_boundary_evidence": "retain up to 47ms around start/end within audited scope; execute only actual timestamps in [start,end)",
                   "run_coverage": {"start": start.isoformat(), "end": end.isoformat()},
                   "warmup_start": warm_start.isoformat()}
     output.parent.mkdir(parents=True, exist_ok=True)

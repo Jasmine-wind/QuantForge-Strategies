@@ -32,7 +32,9 @@ uv sync --locked --extra test
 
 - 区间 `[start,end)`，起止必须是分钟边界；所需合约价与 Mark Price 每分钟完整。4H 预热到信号区间连续。任何错误直接指出文件与时间，不排序修复、不插值、不寻找更晚成交价、不用合约价替代 Mark。
 - EMA 至少 150 根已完成 pre-start 4H；布林带至少 `window+1` 根。指标使用全部提供的已完成预热历史，EMA seed 因而也是输入的一部分。预热不交易；EMA 初始 Flat，只在区间内交叉时入场。
-- Funding 允许真实归档中的毫秒时间戳，按实际时点结算，不舍入成交时点。本版覆盖校验按 BTCUSDT UTC 00/08/16 的 8H 结算桶检查缺失；若其他历史时期改变结算周期，应先调整并核验契约，不把未知 Funding 当作零。
+- Funding 使用**已核验的固定计划**，不从待校验输入推断周期或放宽容差：仅支持 `[2020-01-01,2026-08-01)` UTC 的 BTCUSDT。79 个官方原始存档的 7,212 次结算均为 UTC 00/08/16、`funding_interval_hours=8`，原始时间偏差为 **0～+47ms（含端点，整数毫秒）**；不允许提前、亚毫秒或更大偏差，范围外失败而不沿用计划。证据及复核命令见 `docs/DATA_AUDIT.md`。
+- 每条 Funding 必须匹配一个合法结算，每个应有结算恰好一条；同一次结算的不同毫秒记录也视为重复。文件整体先校验、再按**实际**时间取 `[start,end)`；错误包含文件、预期与实际记录，不去重、不移动时间、不补零、不丢弃异常。
+- 匹配只确定事件身份，不改变账户时间。`T` 的 Funding 发生在同点订单之前；`T+1ms` 可能发生在订单之后。合法边界旁的记录可作为覆盖证据，但区间外的实际事件不收费。缺少可能与区间相交的结算窗口证据时失败，不猜测为零。CLI 起止仍要求分钟对齐。
 
 配置示例见 [`configs/ema.json`](configs/ema.json)、[`configs/bollinger.json`](configs/bollinger.json)。所有文件路径（包括 output_dir）**相对配置所在目录**解析。EMA 参数 `fast/slow` 默认 20/50；布林参数 `window/std_multiplier` 默认 20/2，总体标准差 ddof=0。
 
@@ -48,11 +50,13 @@ uv sync --locked --extra test
 .venv/bin/python -m qfs.import_quantforge \
   --dataset ../QuantForge/data/versions/e8510e8a3f00fd5d \
   --raw-root ../QuantForge/data/raw/binance \
-  --output data/binance-2020-02 \
+  --output data/binance-2020-02-ms \
   --start 2020-02-01T00:00:00Z --end 2020-03-01T00:00:00Z
 ```
 
-输出必须是**不存在的新目录**；不覆盖旧转换，不在源数据内写入。输出四个 Parquet 和 `provenance.json`，包含原始/规范化文件哈希、原始覆盖、选定覆盖和转换说明。4H 和合约价包含 150 根 4H 的预热，Mark 与 Funding 取运行区间。归档缺失/校验失败/缺口/Funding Mark 缺失即失败；转换不下载、不补值。
+输出必须是**不存在的新目录**；不覆盖旧转换，不在源数据内写入。输出四个 Parquet 和 `provenance.json`，包含原始/规范化文件哈希、覆盖、Funding 契约与转换说明。4H 和合约价含 150 根 4H 预热；Mark 取运行区间；Funding 在已核验范围内另保留起止旁最多 47ms 的边界证据，仅区间内实际事件用于结算。
+
+**时间精度修复：**旧 schema-7 的 `funding_time_utc` 是可能截秒的显示列，`funding_time_ms` 才是原始整数时间。转换器使用后者，检查显示列只能为原时刻或截秒显示，绝不拿显示列/计划时点替代实际事件。旧版 `data/binance-2020-02` 不覆盖；应重新转换到 `-ms` 新目录。归档缺失/校验失败/缺口/Funding Mark 缺失即失败；转换不下载、不补值。
 
 将完整来源带入实际运行配置（可重复执行；仅更新本仓库 `.local`）：
 
@@ -61,19 +65,23 @@ uv sync --locked --extra test
 import json
 from pathlib import Path
 from qfs.data import sha256
-source = json.loads(Path('data/binance-2020-02/provenance.json').read_text())
-source['provenance_file_sha256'] = sha256('data/binance-2020-02/provenance.json')
+source = json.loads(Path('data/binance-2020-02-ms/provenance.json').read_text())
+source['provenance_file_sha256'] = sha256('data/binance-2020-02-ms/provenance.json')
 Path('.local').mkdir(exist_ok=True)
 for name in ('ema', 'bollinger'):
     config = json.loads(Path(f'configs/{name}.json').read_text())
     config['data_source'] = source
-    Path(f'.local/real-{name}.json').write_text(json.dumps(config, indent=2))
+    with Path(f'.local/funding-ms-{name}.json').open('x', encoding='utf-8') as f:
+        json.dump(config, f, indent=2)
 PY
-.venv/bin/qfs backtest --config .local/real-ema.json
-.venv/bin/qfs backtest --config .local/real-bollinger.json
+.venv/bin/qfs backtest --config .local/funding-ms-ema.json
+.venv/bin/qfs backtest --config .local/funding-ms-bollinger.json
 # 可选验收：两策略各运行两次，逐字节比较四份报告，并逐笔/逐分钟独立核账
-.venv/bin/python tools/verify_real.py
+.venv/bin/python tools/verify_real.py --config-prefix .local/funding-ms \
+  --output .local/funding-ms-verification.json
 ```
+
+配置创建脚本仅用于首次创建，不覆盖已有本机配置；重复验证直接运行后续命令。新版契约为 `qfs-v1.1`，原固定输入的账本结果不变；恢复 2 月 15 条原始毫秒时间后，订单同点附近的 Funding 归属及结果有可解释变化，比较见 `docs/VALIDATION.md`，不伪称修复前后真实输入完全相同。
 
 已完成真实数据端到端验证：**2020-02-01 至 2020-03-01 UTC（29 天）**。这是旧 QuantForge 已探索过的历史区间，**不是独立样本外、显著性或未来盈利证据**。1 月 Mark Price 有缺口，不能把全量旧数据无条件用于回测。合成 fixtures 只用于逻辑正确性测试。
 
@@ -90,7 +98,7 @@ PY
 - `equity.csv`：初始权益、每个分钟结束的 Mark 权益、终点平仓后权益。UTC `time` 表示完成边界，非分钟 open_time；终点可能有两行，最后一行是平仓后的账户（`event` 区分）。
 - `manifest.json`：配置、全部数据 SHA-256 与文件覆盖、来源、Git commit/dirty 状态、源代码 SHA-256、依赖版本、口径版本。
 
-最大回撤包含初始权益和所有分钟估值及终点费用。年化按实际日历天数 / 365。Sharpe 仅完整 UTC 日的边界权益收益，sample std ddof=1、sqrt(365)、无风险收益为零；不足两个日收益/零标准差返回 null。胜率按净盈亏 > 0，净盈亏包括双边费用与持仓 Funding；平均盈亏比缺任一侧返回 null，Profit Factor 无亏损时返回 null，全亏时为 0。
+最大回撤保持**分钟 Mark close 采样**，包含初始权益及终点费用；可能遗漏分钟内 Funding/价格事件造成的权益波动。本轮不扩展风险引擎。年化按实际日历天数 / 365。Sharpe 仅完整 UTC 日的边界权益收益，sample std ddof=1、sqrt(365)、无风险收益为零；不足两个日收益/零标准差返回 null。胜率按净盈亏 > 0，净盈亏包括双边费用与持仓 Funding；平均盈亏比缺任一侧返回 null，Profit Factor 无亏损时返回 null，全亏时为 0。
 
 正常完成退出 0 并打印目录；输入/计算/写入失败退出非零且不发布成功或部分报告。权益触及非正会锁定停止新增仓位，仍按既有退出规则完成记录，发布**完整且显式标为 invalid** 的报告，打印失效时间与原因并退出非零；不能把恢复后的余额视为有效成功回测。
 
@@ -98,6 +106,6 @@ PY
 
 ## 已知模型限制
 
-1m 市价近似、常数滑点与显式假定的费率；没有订单簿、排队、流动性、部分成交。没有数量步进、最小名义金额、再平衡、完整保证金、维持保证金或强平费用；**不具备实盘保证金风险精度**。float64 计算会有舍入误差。Funding 校验仅针对上述历史结算周期。没有 ML、搜索、多资产、Web、数据库服务、行情下载或实盘连接。
+1m 市价近似、常数滑点与显式假定的费率；没有订单簿、排队、流动性、部分成交。没有数量步进、最小名义金额、再平衡、完整保证金、维持保证金或强平费用；**不具备实盘保证金风险精度**。float64 计算会有舍入误差。Funding 计划与固定 0～+47ms 容差仅适用于上述已核验历史范围，其他时期必须另行核验，不能自动放宽。没有 ML、搜索、多资产、Web、数据库服务、行情下载或实盘连接。
 
 验收映射与验证结果见 [docs/VALIDATION.md](docs/VALIDATION.md)。

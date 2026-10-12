@@ -28,6 +28,9 @@ def legacy_fixture(tmp_path, frames, config):
         frame = frames[key].copy()
         if key == "funding":
             frame = frame.rename(columns={"funding_time": "funding_time_utc", "funding_mark_price": "mark_price"})
+            frame["funding_time_ms"] = frame.funding_time_utc.map(lambda t: t.value // 1_000_000)
+            # Match the actual legacy CSV: its display UTC column truncates ms.
+            frame["funding_time_utc"] = frame.funding_time_utc.dt.floor("s")
             frame["mark_price_source"] = "funding_record"
         else:
             frame = frame.rename(columns={"open_time": "open_time_utc"})
@@ -103,6 +106,59 @@ def test_converter_rejects_tampering_and_missing_data(dataset, tmp_path, damage)
         signed_manifest(folder, {k: v for k, v in value.items() if k not in {"sha256", "version_id"}})
     output = tmp_path / "normalized"
     with pytest.raises(ValueError):
+        convert(folder, raw, output, config.start, config.end)
+    assert not output.exists()
+    assert not list(tmp_path.glob(".qfs-import-*"))
+
+
+def test_converter_preserves_native_ms_not_display_seconds(dataset, tmp_path):
+    config, frames, _ = dataset()
+    actual = config.start + pd.Timedelta(milliseconds=47)
+    frames["funding"].loc[0, "funding_time"] = actual
+    frames["funding"].loc[0, "funding_rate"] = .01
+    folder, raw, _ = legacy_fixture(tmp_path, frames, config)
+    output = tmp_path / "precise"
+    convert(folder, raw, output, config.start, config.end)
+    funding = pd.read_parquet(output / "funding.parquet")
+    assert funding.iloc[0].funding_time == actual
+    new = Config.from_dict(config.as_dict() | {"data": {k: str(output / f"{k}.parquet") for k in config.data}})
+    from qfs.engine import run_backtest
+    result = run_backtest(new, load_data(new))
+    assert result.trades.iloc[0].funding == -50
+    assert result.equity.iloc[-1].equity == 9950
+
+
+@pytest.mark.parametrize("damage", ["display", "fractional_ms", "missing_ms"])
+def test_converter_refuses_ambiguous_native_timestamp(dataset, tmp_path, damage):
+    config, frames, _ = dataset()
+    folder, raw, _ = legacy_fixture(tmp_path, frames, config)
+    source = folder / "funding.csv"
+    frame = pd.read_csv(source, dtype=str)
+    if damage == "display":
+        frame.loc[0, "funding_time_utc"] = (config.start + pd.Timedelta(seconds=1)).isoformat()
+    elif damage == "fractional_ms":
+        frame.loc[0, "funding_time_ms"] += ".5"
+    else:
+        frame.loc[0, "funding_time_ms"] = ""
+    frame.to_csv(source, index=False)
+    manifest = json.loads((folder / "manifest.json").read_text())
+    manifest["files"]["funding"]["sha256"] = sha256(source)
+    signed_manifest(folder, {k: v for k, v in manifest.items() if k not in {"sha256", "version_id"}})
+    output = tmp_path / "invalid"
+    with pytest.raises(ValueError, match="funding_time") as err:
+        convert(folder, raw, output, config.start, config.end)
+    assert str(source) in str(err.value)
+    assert not output.exists()
+
+
+def test_converter_preserves_boundary_evidence_for_duplicate_detection(dataset, tmp_path):
+    config, frames, _ = dataset(minutes=480, closes={150: 110})
+    extra = pd.DataFrame({"funding_time": [config.end, config.end + pd.Timedelta(milliseconds=47)],
+                          "funding_rate": [0, 0], "funding_mark_price": [100, 100]})
+    frames["funding"] = pd.concat([frames["funding"], extra], ignore_index=True)
+    folder, raw, _ = legacy_fixture(tmp_path, frames, config)
+    output = tmp_path / "invalid"
+    with pytest.raises(ValueError, match="duplicate Funding settlement"):
         convert(folder, raw, output, config.start, config.end)
     assert not output.exists()
     assert not list(tmp_path.glob(".qfs-import-*"))

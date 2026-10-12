@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from conftest import save
+from conftest import save, engine_data
 from qfs.data import load_data
 from qfs.engine import Account, run_backtest
 from qfs.report import metric_summary
@@ -70,8 +70,7 @@ def test_funding_before_entry_and_before_reversal_and_delay(dataset):
     frames["funding"] = pd.DataFrame({"funding_time": [config.start, config.start + pd.Timedelta(hours=4),
                                                        config.start + pd.Timedelta(hours=4, minutes=1)],
                                      "funding_rate": [.01, .01, .01], "funding_mark_price": [100, 100, 100]})
-    save(config, frames)
-    result = run_backtest(config, load_data(config))
+    result = run_backtest(config, engine_data(config, frames))
     long, short = result.trades.iloc[0], result.trades.iloc[1]
     assert long.funding == -50  # entry-time funding ignored, reversal-time charged to long
     assert long.exit_time == (config.start + pd.Timedelta(hours=4)).isoformat()

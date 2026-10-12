@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from .config import Config, utc
+from .funding import funding_policy, validate_funding_schedule
 
 
 SCHEMAS = {
@@ -35,6 +36,9 @@ def validate_frame(frame, kind, label):
     df.index = pd.DatetimeIndex(times, tz="UTC", name=time_col)
     if df.index.has_duplicates:
         t = df.index[df.index.duplicated()][0]
+        if kind == "funding":
+            raise ValueError(f"{label}: duplicate Funding settlement; expected {t.round('8h').isoformat()}, "
+                             f"actual [{t.isoformat()}, {t.isoformat()}]")
         raise ValueError(f"{label}: duplicate timestamp {t}")
     if not df.index.is_monotonic_increasing:
         i = np.flatnonzero(df.index[1:] < df.index[:-1])[0] + 1
@@ -109,13 +113,7 @@ def load_data(config: Config):
     last_signal_open = (config.end - pd.Timedelta(nanoseconds=1)).floor("4h") - pd.Timedelta(hours=4)
     required = pd.date_range(bars.index[0], last_signal_open, freq="4h")
     require_grid(bars, required, config.data["bars_4h"])
-    funding = frames["funding"]
-    funding = funding[(funding.index >= config.start) & (funding.index < config.end)]
-    # BTCUSDT archive settlements are approximately 8-hourly (some have ms jitter).
-    # Require one event in each intersecting UTC 00/08/16 settlement bucket.
-    expected_slots = pd.date_range(config.start.ceil("8h"), config.end, freq="8h", inclusive="left")
-    actual_slots = funding.index.floor("8h")
-    missing = expected_slots.difference(actual_slots)
-    if len(missing):
-        raise ValueError(f"{config.data['funding']}: missing Funding settlement at {missing[0]}")
+    funding = validate_funding_schedule(frames["funding"], config.start, config.end, config.data["funding"])
+    files["funding"]["settlement_validation"] = funding_policy()
+    files["funding"]["execution_row_count"] = len(funding)
     return MarketData(bars, frames["trade_1m"], frames["mark_1m"], funding, files)

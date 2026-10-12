@@ -9,6 +9,7 @@ from conftest import save
 from qfs.config import Config
 from qfs.data import load_data, sha256
 from qfs.engine import Result, TRADE_COLUMNS, run_backtest
+from qfs.funding import funding_policy
 from qfs.report import metric_summary, write_reports
 
 
@@ -92,6 +93,10 @@ def test_cli_config_end_to_end_determinism_manifest(dataset, name):
     manifest = json.loads((outputs[0] / "manifest.json").read_text())
     summary = json.loads((outputs[0] / "summary.json").read_text())
     assert summary["status"] == "completed"
+    assert summary["funding_validation"] == funding_policy()
+    assert manifest["data_files"]["funding"]["settlement_validation"] == funding_policy()
+    assert manifest["data_files"]["funding"]["execution_row_count"] == 1
+    assert any("intraminute" in s for s in summary["limitations"])
     assert summary["trade_count"] == 1
     assert summary["config"] == config.as_dict()
     assert manifest["config"] == config.as_dict()

@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from qfs.config import Config
+from qfs.data import MarketData, validate_frame
 
 
 @pytest.fixture
@@ -47,3 +48,17 @@ def dataset(tmp_path):
 def save(config, frames):
     for key, frame in frames.items():
         frame.to_parquet(config.data[key], index=False)
+
+
+def engine_data(config, frames):
+    """Engine-only synthetic event seam, NOT the real historical schedule loader.
+
+    Arbitrary extra settlement times test chronological account mathematics. They
+    are never passed off as valid historical inputs or used to publish reports.
+    """
+    checked = {k: validate_frame(v, k, f"synthetic engine {k}") for k, v in frames.items()}
+    within = lambda f: f[(f.index >= config.start) & (f.index < config.end)]
+    bars = checked["bars_4h"]
+    return MarketData(bars[bars.index + pd.Timedelta(hours=4) < config.end],
+                      within(checked["trade_1m"]), within(checked["mark_1m"]),
+                      within(checked["funding"]), {})

@@ -37,9 +37,9 @@
 - 2 月 Funding 87 条，价格齐全，来自 Mark 1m Open。逐条按事件所在分钟与官方原始 Mark Open 做 **Decimal 精确比较，87/87 一致**。
 - 另从 canonical CSV 对预热+运行区间独立重放 `1m → 4H`，检查每个块 240 根唯一连续分钟及 Decimal OHLCV 聚合，**324/324 一致，0 mismatch**。并非只依赖旧文档宣称的重放结果。
 
-## 转换后的本地输入
+## 首次交付的本地输入（保留用于对照，不作为修复后的原生时间输入）
 
-`data/binance-2020-02`（Git 忽略；生成命令见 README）。没有插值、补价或 Funding 替代；保留原始来源文件和规范化文件哈希。规范化价格转为 float64，精度限制明确披露。
+`data/binance-2020-02`（Git 忽略）。没有插值、补价或价格替代，但本轮确认旧转换使用 `funding_time_utc` 显示列，丢失了 2 月 15 条记录的毫秒。这是 `fa45603` 的相关缺陷，不能继续声称它保留原始实际结算时间。该目录原样保留用于固定输入前后比较，不覆盖用户已有数据；新版目录及生成命令见下文和 README。
 
 | 文件 | 行数 | SHA-256 |
 |---|---:|---|
@@ -49,6 +49,51 @@
 | funding.parquet | 87 | `d55b42479dddd7e553ea9b6dd52eab7cc75b7bfa52ba87ab84acd53bc227f9d3` |
 
 `provenance.json` 的本地文件 SHA-256 为 `c103a33ec8446b67d684a591d4d217a31b11750bd0a3716ece66772bfe1daa2b`（包含本机绝对路径，在其他路径转换后此哈希会变化）。另一次转换到新的 `data/binance-2020-02-check` 验证不覆盖行为及相同四份 Parquet 内容。
+
+## 本轮 Funding 原始计划与时间容差核验
+
+核验范围明确限制为 **`[2020-01-01T00:00:00Z,2026-08-01T00:00:00Z)`**，不是默认套用所有 BTCUSDT 历史。只读重读 79 个 Binance 官方原始 Funding ZIP，逐对象匹配旧 provenance 的 SHA-256；本地 CHECKSUM 存在时另行核对。原始字段为 `calc_time,funding_interval_hours,last_funding_rate`：
+
+- 7,212 条原始记录，`funding_interval_hours` 全为 **8**。
+- 原始 `calc_time` 是整数 epoch 毫秒；按最近 UTC 00/08/16 候选点核对，7,212 个计划结算全部一对一，0 缺失、0 重复。
+- 原始 `calc_time/rate` 与 canonical `funding_time_ms/funding_rate` 逐条相等（rate 使用 Decimal，不拿显示时间作实际时间）。
+- 3,988 条延迟 0ms，3,224 条非零；全部非负，最大 **47ms**，位于 `2021-09-17T08:00:00.047Z`。因此规则固定为 **整数毫秒延迟 `[0,+47]ms`（两端包含）**，不允许提前或亚毫秒，不从待校验文件的最大值自动放宽。
+- 2020-02 的原始 87 条：0ms×72、1ms×11、2/4/9/15ms 各 1 条。
+- 本机缺少 provenance 引用的 **2026-08 月原始 Funding ZIP**。canonical 虽有该月前 29 条，本轮没有拿未经原始重放核验的时期扩展计划；2019、2026-08 及之后一律不在本规则范围。
+
+相关官方原始对象 SHA-256：
+
+| Funding ZIP | SHA-256 |
+|---|---|
+| 2020-02（87 条） | `6599466d108d120c64a078824326c063ed2d4335b3292e52c5e572f79166533a` |
+| 2021-09（含最大 47ms） | `03f25a7c25eef18d5f5b5b7bb0b664cab7a210b409f37e95a54e141808a0752d` |
+| 2026-07（93 条） | `e36fcc66f493d7d9ec348c852fc22e9f318c79cf7adae17398a3994ae0adc41e` |
+
+可复核命令（输出必须选择新文件；不修改源仓库）：
+
+```bash
+.venv/bin/python tools/audit_funding_schedule.py \
+  --dataset ../QuantForge/data/versions/e8510e8a3f00fd5d \
+  --raw-root ../QuantForge/data/raw/binance \
+  --cache ../QuantForge/data/archive-object-cache/binance-public-data \
+  --output .local/funding-schedule-audit.json
+```
+
+结果包含 79 个官方路径/哈希和偏差频数，保留在本机，不提交行情、费率、报告或本机配置。加载器使用固定契约 `btc-usdt-native-8h-2020-2026-r1`：整个输入文件先验证每条匹配及唯一性，再检查运行所需结算窗口是否有记录，最后按实际时间 `[start,end)` 取执行事件。错误中的 `expected` 是最近候选名义时点；无法凭错时记录推断它原本来自哪一笔。未知范围、不合法时间、同结算的不同毫秒记录均失败，不静默修复。
+
+### 边界规则与精度修复
+
+`[T,T+47ms]` 与运行 `[start,end)` 有交集时，需要该结算的实际记录作为证据；有证据且实际时间在区间外时不收费。CLI 仍只接受分钟对齐的区间，底层匹配函数也测试了毫秒边界。合法延迟可能落在同点开仓/平仓之后，匹配不会舍入或改变账户事件顺序。文件中区间外的异常也不会因先切片而被隐藏。
+
+旧 CSV 的 UTC 显示列在全部 7,241 行中有 3,235 行截掉毫秒；在原始已核验 7,212 行中为 3,224 行。新版适配器明确使用原始 `funding_time_ms`，同时检查显示列只能等于该原时点或其截秒显示，矛盾/缺失/非整数 epoch 时失败。
+
+修复后的本地目录：**`data/binance-2020-02-ms`**。4H / 合约 1m / Mark 的哈希与上表相同；Funding 保留原始时间并含边界证据：
+
+| 文件 | 行数 | SHA-256 |
+|---|---:|---|
+| funding.parquet（执行 87 条 + 03-01 00:00 的区间外证据 1 条） | 88 | `428c78b6ac96b93417ace589f09df9cfd49096faccef0088a9e9d7b67a6df2a5` |
+
+88/88 的原始时间、rate、Mark 都与 canonical 原始列逐条核对；运行实际使用 87 条，其中 15 条非零毫秒完整保留。新版 `provenance.json` 本机文件哈希为 `ce0c91b44fbe4737d3c14c57383782855bd1095a7173cf25fb496a6c41bf3e10`（随本机路径改变），另记录原始时间列权威性、边界证据和固定验证契约。修复结果及旧固定输入对照见 `VALIDATION.md`。
 
 ## 证据边界
 
