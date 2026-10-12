@@ -119,6 +119,22 @@ PY
 
 资金、position_fraction、maximum_leverage、fee/slippage 显式配置。默认 10000 USDT、50%、1 倍、每边手续费/滑点各 0.0005。要求 `0 < position_fraction <= maximum_leverage <= 1`；矛盾配置失败，不暗自改仓位。Binance 实际手续费依账户等级/优惠变化：[官方费率](https://www.binance.com/en/fee/futureFee)。`data_source` 可携带完整来源对象，原样保存；没有来源时明确记为未核验，不凭文件名认证来源。
 
+## 独立官方原始存档准备
+
+不需要旧canonical目录。`qfs prepare` 只读取本地官方BTCUSDT月度合约1m、Mark1m、Funding ZIP和CHECKSUM，校验来源路径/市场/月份/字段/整数毫秒/时序及SHA；从240根完整1m聚合4H，Decimal精确求volume后转float64，保留150根4H预热，Funding关联实际所在分钟的Mark Open（包括边界证据）。最后通过原严格loader，整个5文件目录原子发布，不覆盖或写入源目录。
+
+```bash
+.venv/bin/qfs prepare --manifest .local/raw-feb-manifest.json \
+  --start 2020-02-01T00:00:00Z --end 2020-03-01T00:00:00Z \
+  --output data/official-feb
+```
+
+manifest为JSON：`{"symbol":"BTCUSDT","archives":[...]}`。每项仅有 `kind`（trade_1m/mark_1m/funding）、`path`、`checksum`（路径相对manifest）、`official_url`、`sha256`。例如合约对象URL为 `https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2020-02.zip`；Mark目录为markPriceKlines，Funding为fundingRate/BTCUSDT/BTCUSDT-fundingRate-2020-02.zip。列表按每类月份升序，不能靠排序去重修复。SHA须与该ZIP和CHECKSUM内的官方文件名同时相符。
+
+2月完整输入需要合约1月/2月（1月7日起预热）、Mark及Funding的2月/3月（3月1日证据）；6月窗口需要相应全部月及end边界月。缺存档/缺分钟/重复/无效值/Funding Mark时失败，不补值或改策略。输出4个标准Parquet＋provenance.json，normalized_files.path相对新目录；将provenance完整注入自己的backtest/compare配置并按上述核账工具复核。
+
+本轮优先复用本机已核验官方原始存档，**无自动下载器、无canonical运行依赖**。CHECKSUM及URL是来源记录/完整性核验，不等于独立签名认证。支持范围仍为Funding `[2020-01-01,2026-08-01)`；旧已见历史属性不因独立准备而改变。真实对照及目录见DATA_AUDIT/VALIDATION。
+
 ## 从旧 QuantForge 只读转换
 
 检查结果及核验哈希见 [docs/DATA_AUDIT.md](docs/DATA_AUDIT.md)。旧 schema-7 CSV、归档 ZIP、Parquet analytics mirror 都只读检查；不复用旧研究架构或合成执行器。实际使用 canonical CSV，而不是非正式 analytics mirror；逐文件 SHA-256、manifest 身份及官方 Mark ZIP 的本地 CHECKSUM 均核验。

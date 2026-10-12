@@ -143,6 +143,16 @@
 
 重叠关系：window-01完整包含先前2020-02；window-02与此前29天及366天验证区间不重叠，但仍是旧已见数据；window-03/04分别为原366天区间前后半段，两者间不重叠，不能称为新OOS。独立窗口各自重置相同初始权益/策略Flat状态，在不同实际入场/资金状态下不能把结果当成原年度连续账户或拼接收益。
 
+## 独立官方原始存档准备（基线 a335702）
+
+`qfs prepare` 不读取旧canonical或其manifest。仅以显式本机原始存档清单读取官方月度BTCUSDT合约1m、Mark1m、Funding ZIP及CHECKSUM。原始字段已实际检查：Kline12列、open_time整数毫秒、close_time=open_time+59999；Funding header为calc_time,funding_interval_hours,last_funding_rate。已检查旧隔离转换定义：4H由完整240分钟OHLC/Decimal volume汇总，Funding Mark为实际时间所在分钟的Mark Open。本轮不复制旧研究架构，不需要网络下载。
+
+新的 `.local/raw-{feb,six}-manifest.json` 只声明对象URL/本机ZIP/CHECKSUM及SHA。2月读取2个合约月、2个Mark月、2个Funding月；六个月读取7个合约月、7个Mark月、7个Funding月。边界月为3月或8月，用于真实end Funding和Mark证据；所有输入保留原序，全文件验证字段/重复/时序/数值，所需区间另严格检查网格。原始存档来自旧只读raw目录，但运行不需要canonical身份、CSV或任何旧Python模块。
+
+输出 `data/official-feb` / `data/official-six`，重复输出 `*-repeat`：各5文件（四Parquet＋provenance）逐字节一致。分别与原 `data/binance-2020-02-ms`、`data/study-window-01-ms` 逐列精确比较：324/1242根4H、77760/298080合约分钟、41760/262080 Mark分钟、88/547 Funding均在实际UTC时刻/数值上完全一致。唯一物理编码差异是合约/4H时间列：新原始epoch毫秒得到datetime64[ms]，旧ISO CSV转换为datetime64[us]；不是时刻变化、不损失原生毫秒。Mark和Funding物理类型也一致。
+
+2区间共24组固定成员/成本场景：交易及分钟权益CSV均与原报告逐字节相等，全部财务指标与分期CSV相等，完整独立核账通过。新的比较每区间再运行两次、52文件一致；未修改/覆盖旧输入、原报告或旧证据。完整原始ZIP/CHECKSUM/清单SHA、聚合定义、Funding固定政策和新规范文件SHA在新provenance及新报告中保存；新来源不冒用旧canonical dataset identity。
+
 ## 证据边界
 
 已验证2020-02及上述366天完整区间、第二阶段4个6月窗口，不声称全量旧数据均可回测。真实比较及分期核账均完成；这是工程端到端及探索性历史比较 / 分期验证，**不是独立样本外、参数选择、统计显著性或盈利能力证明**。旧仓库已探索数据的样本外属性不会因迁移目录改变。合成行情仅在 `tests/` 中用于业务正确性测试。

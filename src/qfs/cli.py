@@ -1,12 +1,15 @@
 """Offline CLI; all validation and computation finish before any report is published."""
 import argparse
 import sys
+from pathlib import Path
+import zipfile
 
 from .compare import load_compare_config, run_comparison
 from .config import Config
 from .data import load_data
 from .engine import run_backtest
 from .report import write_reports
+from .prepare import prepare
 from .study import StudyConfig, run_study
 
 
@@ -19,8 +22,15 @@ def main(argv=None):
     compare.add_argument("--config", required=True)
     study = sub.add_parser("study", help="Run fixed nonoverlapping six-month exploratory windows offline")
     study.add_argument("--config", required=True)
+    preparation = sub.add_parser('prepare', help='Prepare checked official monthly archives offline')
+    for name in ('manifest', 'start', 'end', 'output'):
+        preparation.add_argument('--' + name, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == 'prepare':
+            prepare(args.manifest, args.output, args.start, args.end)
+            print(Path(args.output).resolve())
+            return 0
         if args.command == "study":
             output = run_study(StudyConfig.load(args.config))
             print(output)
@@ -33,7 +43,7 @@ def main(argv=None):
         data = load_data(config)
         result = run_backtest(config, data)
         output = write_reports(config, data, result)
-    except (ValueError, TypeError, KeyError, OSError, OverflowError) as exc:
+    except (ValueError, TypeError, KeyError, OSError, OverflowError, zipfile.BadZipFile) as exc:
         print(f"qfs: {exc}", file=sys.stderr)
         return 1
     if result.invalid_time:

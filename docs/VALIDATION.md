@@ -1,5 +1,21 @@
 # V1 / V2 验收记录
 
+## 独立数据准备与离线浏览（基线 a335702，本轮持续记录）
+
+用户授权本轮自主实现/测试/审查/修复/分阶段本地提交，不自动推送。初始工作区干净；先补充既有V2_SPEC第8节及AGENTS授权范围，保持V1、Funding、245既有测试、年化溢出与study扫描完整性和默认产物契约。旧QuantForge只读。基线CI [38266056056](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38266056056) 初查in_progress，后API确认headSha=a335702、completed/success；这不是尚未推送新代码的远端CI。
+
+### 阶段一：独立官方原始存档准备
+
+新增小型 `prepare.py` 与 `qfs prepare`，显式manifest无需canonical或旧代码，复用validate_frame/require_grid/load_data及既定Funding政策。240完整分钟OHLC/Decimal volume聚合150根预热；整数ms和实际分钟Mark Open含边界证据；5文件原子发布、禁止覆盖/源内写入，来源SHA与CHECKSUM在发布前再次校验。规范文件路径记录为bundle内相对路径，不受输出目录名影响。
+
+先写公开prepare接口失败回归（模块尚不存在），实现后新增15个准备测试：原序/预热/Decimal volume/47ms/Mark/loader、5文件重复、错误URL/SHA/CHECKSUM文件名/CSV member、warm缺口/重复/乱序/无效OHLC/close_time、非整数/48ms Funding、缺Mark，以及CLI/文件系统失败staging清理。全部15通过；既有245测试留待本轮最终全套再次运行。合成存档只用于正确性。
+
+真实准备先2月，再6月window-01（2020-02～08），读取本机已核验官方ZIP/CHECKSUM，不用网络或canonical运行路径。新输入与旧四类时间/数值逐列精确相同；发现合约和4H的Parquet时间物理单位ms/us差异，经精确UTC时刻比较和下述金融字节对照证明无行为差异，不为匹配物理编码改策略/引擎。每组4成员×3成本的完整财务指标和24份交易/权益CSV与原输入报告完全相同，periods.csv也相同。每区间新的比较重复两次，52/52文件一致，全部交易、分钟状态、分期、年化null独立核账通过。准备重复各5/5文件一致。
+
+实际位置：`data/official-feb`、`data/official-six`，重复各`-repeat`；新比较 `runs/compare-7hi8o5v_` / `compare-6qe4xhey`（2月）、`runs/compare-l1rttnce` / `compare-dji53bpy`（六个月）；新证据 `.local/official-{feb,six}-verification.json`，配置/清单 `.local/official-*-compare.json` / `raw-*-manifest.json`。这些均不提交。原 `compare-aaadgj0m` 与 `study-g5jo08cs/windows/window-01` 用于只读金融对照，未覆盖。
+
+自审修复：原始ZIP member/close_time/月身份必须与官方对象一致，不能只验HASH后按位置猜格式；全文件先校验、后切片，不能把外部重复/异常丢掉；volume保留Decimal避免float逐项求和差异；输出在发布前再次拒绝并发出现的目标。数据准备仍离线、仅固定已核验Funding范围，CHECKSUM/URL不伪称来源独立签名或新OOS。
+
 ## V2 第二阶段选择证据完整性补修（基线 e492f0f）
 
 本轮从 `e492f0f24116bb0a41ddb10443686c8ad2f18962` 干净工作区开始，只修生产配置和独立核账的月度扫描完整性。没有改变策略/账户/成本/指标、已验Funding范围、第一阶段12月选择或四窗选择规则；没有新增依赖、功能或文档体系。本轮仅本地提交，不自动推送，由用户最终验收。
