@@ -1,6 +1,6 @@
 # QuantForge-Strategies
 
-BTCUSDT Binance U 本位永续的**本地离线历史回测 CLI**。V1 规格唯一来源：[docs/V1_SPEC.md](docs/V1_SPEC.md)。支持 4H EMA 交叉与布林带均值回归，共用单仓、1m 执行与 Mark Price 估值引擎；不联网、不连接账户、不下单。
+BTCUSDT Binance U 本位永续的**本地离线历史回测 / 比较 CLI**。V1 成交、账户及数据契约：[docs/V1_SPEC.md](docs/V1_SPEC.md)；本轮比较扩展：[docs/V2_SPEC.md](docs/V2_SPEC.md)。支持 4H EMA 交叉与布林带均值回归，共用单仓、1m 执行与 Mark Price 估值引擎；不联网、不连接账户、不下单。
 
 ## 安装与运行
 
@@ -13,9 +13,58 @@ uv sync --locked --extra test
 .venv/bin/pytest -q
 .venv/bin/qfs backtest --config configs/ema.json
 .venv/bin/qfs backtest --config configs/bollinger.json
+.venv/bin/qfs compare --config configs/compare.json
 ```
 
 示例配置需要先准备下述真实本地文件；仓库不包含大体量行情，也不提供下载器或用合成数据演示盈利。`uv.lock` 固定依赖解析结果。
+
+## V2：统一探索性历史比较 / 分期验证
+
+`compare` 配置见 [`configs/compare.json`](configs/compare.json)：沿用 V1 公共字段，但**没有 strategy 字段**；不允许自定义成员参数、不同输入或新增场景。固定比较 EMA20/50、布林20/2、USDT 现金（不计息、零持仓/收益）和 **BTCUSDT U 本位永续多头持有基准（不是现货）**。四个账户共享输入、初始权益和仓位比例，不是策略组合。
+
+永续基准在 start 的 1m Open 按统一仓位比例开多，经过同一账户/成交/费用/Funding/Mark 引擎，持仓不再平衡，end 按 V1 末分钟 close 平仓。EMA/布林原规则与 Funding 严格契约不变。成员原始配置可用 `backtest` 重放；两基准策略名为 `cash` / `btc_perpetual_long_hold`、参数为空。
+
+三个固定成本假设：`base` 原 fee/slippage；`slippage_x2` fee不变、滑点×2；`fee_and_slippage_x2` 两者×2。**每组完整重跑**，费用改变后续权益和数量，不只是减估算成本。Funding 原始时点/费率/Mark不变，但金额随持仓变化。倍增后不满足费率范围则整体失败；不是交易所实际费率。
+
+独立 `runs/compare-*` 原子目录内有：
+
+- `comparison.json`：版本、共享及12个成员有效配置、数据/代码/依赖信息、成本场景、全区间/分期口径、原报告相对链接与哈希。
+- `comparison.csv`：12组全区间净收益、年化、分钟收盘最大回撤、完整日 Sharpe、交易数与 costs。
+- `periods.csv`：UTC月/年、实际起止/有效长度、complete/partial、边界权益/权益收益、局部分钟收盘回撤。
+- `report.md`：探索性比较摘要与原报告链接；不按收益删选成员或给失败子集排名。
+- `reports/<scenario>/<member>/`：完整 V1 summary/trades/equity/manifest。
+
+分期截取同一连续账户曲线，**跨月持仓不重置、不月末平仓**。边界为完成分钟的状态，同点 Funding/订单影响后续片段；实际运行 end 使用最终平仓后权益。首尾不完整期间只计实际片段，不年化。分期回撤峰值从左边界重新计，不继承更早月份峰值，也不扩展分钟内风险采样。分期不输出整笔交易盈亏/Funding/成本的退出月归属。分期收益复合可核对全区间。
+
+任何成员失败（包括非正权益）整体非零退出，清理私有 staging，不发布部分成功比较。输入先统一严格校验；随机外层目录名不写入报告，固定配置/数据/代码下全部52份文件可重复。
+
+真实复核可先从已有完整本机 EMA 配置创建**新**比较配置（不覆盖），然后运行：
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+raw = json.loads(Path('.local/funding-ms-ema.json').read_text())
+del raw['strategy']
+with Path('.local/v2-compare-feb.json').open('x') as f:
+    json.dump(raw, f, indent=2)
+PY
+.venv/bin/qfs compare --config .local/v2-compare-feb.json
+.venv/bin/python tools/verify_comparison.py --config .local/v2-compare-feb.json \
+  --output .local/v2-feb-acceptance.json
+```
+
+验证工具独立从成交/Funding/价格建立现金事件账本，核对每笔交易、每分钟状态、所有分期边界和复合收益，并重复CLI两次比对52个文件。支持 `--run <已有目录>` 单次核账，但明确不声称该次已验证重复性。输出要求新文件，不覆盖证据。
+
+已完成 **2020-02** 及按事先固定质量规则选择的 **[2023-03-01,2024-03-01) UTC（366天）**。不是选最好收益：只读扫描从2020-01开始的完整月，优先最早连续12完整月，失败则按规格取最早最长完整月块；不插值、不绕过 Mark/Funding。2020-12、2021-07、2022-07/10、2023-02 等缺口打断较早候选；2021-06因转换边界证据缺少 Funding Mark 同样排除。完整质量记录保留在本机，汇总见 [DATA_AUDIT.md](docs/DATA_AUDIT.md)。质量选择工具：
+
+```bash
+.venv/bin/python tools/select_comparison_window.py \
+  --dataset ../QuantForge/data/versions/e8510e8a3f00fd5d \
+  --raw-root ../QuantForge/data/raw/binance --output .local/v2-window-selection.json
+```
+
+旧数据依旧已见；所有结果仅为探索性历史比较 / 分期验证，既无独立 OOS，也不证明盈利。最小 GitHub Actions 使用 uv.lock + 固定合成正确性 fixtures，不需要本机行情；尚未推送的新工作不能声称远端 CI 已执行。
 
 ## 数据与配置
 

@@ -88,12 +88,17 @@ class Result:
 
 def run_backtest(config: Config, data: MarketData):
     account = Account(config.initial_equity, config.taker_fee_rate, config.slippage_rate)
-    features = indicators(data.bars.close, config.strategy)
-    signal_rows = {t + pd.Timedelta(hours=4): i for i, t in enumerate(features.index)
-                   if config.start <= t + pd.Timedelta(hours=4) < config.end and i > 0}
+    benchmark = config.strategy["name"] in {"cash", "btc_perpetual_long_hold"}
+    if benchmark:
+        signal_rows = {}
+    else:
+        features = indicators(data.bars.close, config.strategy)
+        signal_rows = {t + pd.Timedelta(hours=4): i for i, t in enumerate(features.index)
+                       if config.start <= t + pd.Timedelta(hours=4) < config.end and i > 0}
     funding_rows = list(data.funding.itertuples())
     fund_i = 0
-    target, pending = 0, None
+    target = 1 if config.strategy["name"] == "btc_perpetual_long_hold" else 0
+    pending = None
     trades, curve = [], []
     invalid_time = invalid_reason = None
 

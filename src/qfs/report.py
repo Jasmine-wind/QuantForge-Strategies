@@ -100,7 +100,8 @@ def write_json(path, value):
                           encoding="utf-8", newline="\n")
 
 
-def write_reports(config, data, result):
+def write_report_files(config, data, result, directory):
+    """Write V1 artifacts inside a caller-owned private directory (no publication)."""
     summary = metric_summary(config, result)
     manifest = {"contract_version": CONTRACT_VERSION, "status": summary["status"],
                 "invalid_time": result.invalid_time, "invalid_reason": result.invalid_reason,
@@ -111,14 +112,21 @@ def write_reports(config, data, result):
                 "runtime": {"python": platform.python_version(),
                             **{name: version(name) for name in ("pandas", "numpy", "pyarrow")}},
                 "out_of_sample_boundary": LIMITATIONS[0]}
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    write_json(directory / "summary.json", summary)
+    write_json(directory / "manifest.json", manifest)
+    result.trades.to_csv(directory / "trades.csv", index=False, float_format="%.17g", lineterminator="\n")
+    result.equity.to_csv(directory / "equity.csv", index=False, float_format="%.17g", lineterminator="\n")
+    return summary, manifest
+
+
+def write_reports(config, data, result):
     config.output_dir.mkdir(parents=True, exist_ok=True)
     # Directory name is deliberately excluded from artifact content. Identical inputs have identical bytes.
     staging = Path(tempfile.mkdtemp(prefix=".qfs-", dir=config.output_dir))
     try:
-        write_json(staging / "summary.json", summary)
-        write_json(staging / "manifest.json", manifest)
-        result.trades.to_csv(staging / "trades.csv", index=False, float_format="%.17g", lineterminator="\n")
-        result.equity.to_csv(staging / "equity.csv", index=False, float_format="%.17g", lineterminator="\n")
+        write_report_files(config, data, result, staging)
         output = staging.with_name("run-" + staging.name.removeprefix(".qfs-"))
         staging.rename(output)
         return output

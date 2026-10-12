@@ -105,7 +105,8 @@ def load_data(config: Config):
         raise ValueError(f"{config.data['bars_4h']}: empty 4H input")
     # Only completed bars enter the strategy. Require contiguous warmup + signal history.
     bars = bars[bars.index + pd.Timedelta(hours=4) < config.end]
-    warmup = 150 if config.strategy["name"] == "ema" else config.strategy["params"]["window"] + 1
+    warmup = (150 if config.strategy["name"] == "ema" else
+              config.strategy["params"]["window"] + 1 if config.strategy["name"] == "bollinger" else 0)
     completed = bars[bars.index + pd.Timedelta(hours=4) <= config.start]
     if len(completed) < warmup:
         raise ValueError(f"{config.data['bars_4h']}: need {warmup} completed pre-start warmup bars at {config.start}")

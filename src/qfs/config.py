@@ -73,11 +73,12 @@ class Config:
         if not isinstance(strategy, dict) or strategy.keys() - {"name", "params"}:
             raise ValueError("config: strategy must contain name and optional params")
         name, params = strategy.get("name"), strategy.get("params", {})
-        defaults = {"ema": {"fast": 20, "slow": 50}, "bollinger": {"window": 20, "std_multiplier": 2.0}}
+        defaults = {"ema": {"fast": 20, "slow": 50}, "bollinger": {"window": 20, "std_multiplier": 2.0},
+                    "cash": {}, "btc_perpetual_long_hold": {}}
         if name not in defaults or not isinstance(params, dict) or params.keys() - defaults[name].keys():
             raise ValueError("config: invalid strategy or parameters")
         params = defaults[name] | params
-        int_keys = ("fast", "slow") if name == "ema" else ("window",)
+        int_keys = ("fast", "slow") if name == "ema" else (("window",) if name == "bollinger" else ())
         for key in int_keys:
             if type(params[key]) is not int or params[key] < 2:
                 raise ValueError(f"config: {key} must be an integer >= 2")
