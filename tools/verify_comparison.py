@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
@@ -47,7 +48,14 @@ def verify(output):
         values = curve.equity.to_numpy()
         close(summary['maximum_drawdown'], np.max(1 - values / np.maximum.accumulate(values)))
         days = (config.end - config.start).total_seconds() / 86400
-        close(summary['annualized_return'], math.expm1(math.log(values[-1] / values[0]) * 365 / days))
+        # Decide representability independently from ledger equity and actual duration,
+        # not from the reported null. Negative log-growth underflow remains finite (-1).
+        log_growth = math.log(float(values[-1]) / config.initial_equity) * 365 / days
+        if log_growth > math.log(sys.float_info.max):
+            assert summary['annualized_return'] is None, f"{scene}/{member['member']}: annualized_return must be null for float64 overflow"
+        else:
+            assert summary['annualized_return'] is not None, f"{scene}/{member['member']}: unexpected null for representable annualized_return"
+            close(summary['annualized_return'], math.expm1(log_growth))
         time = pd.DatetimeIndex(pd.to_datetime(curve.time, utc=True))
         boundaries = pd.Series(values, index=time)
         boundaries = boundaries[~boundaries.index.duplicated(keep='last')]

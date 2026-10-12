@@ -1,5 +1,35 @@
 # V1 / V2 验收记录
 
+## V2 第一阶段验收补修（基线 9e4508b）
+
+本轮开始于已推送的 `9e4508b87779f6c564006e3c6a99bdcc5ddd40a0`，fetch确认远端相同、工作区干净。只修 `tools/verify_comparison.py` 的独立年化核验，新增 `tests/test_verify_comparison.py`，更新本记录；生产指标/报告、账户、策略、Funding及V1/V2规格均未修改，不扩展功能，不reset，旧仓库只读。
+
+### 复现 → 回归 → 修复
+
+通过公开 `python -m qfs.cli compare --config ...` 创建完整12组报告，再通过公开 `tools/verify_comparison.py --run ... --output ...` 核账。最小合成fixture为3分钟、初始10000、50%仓位、价格100→110：EMA/永续的期末10500合法，年化 `1.05^175200−1` 超出float64，生产正确输出null。修复前命令
+
+```bash
+.venv/bin/pytest -q tests/test_verify_comparison.py::test_short_positive_return_overflow_full_comparison_verifies
+```
+
+失败于核账第50行：`OverflowError: math range error`。完成公开CLI复现及失败回归后才修改；独立账本权益/实际长度对应log-growth约8548.036762，float64 log上限约709.782713，排除时长单位/读取错误，原因是无条件调用expm1。
+
+核账现在从已复核权益及配置初始权益、实际日历长度独立计算log-growth，用 `sys.float_info.max` 判定可表示范围：溢出必须报告为null；否则禁止null并严格比较 `expm1(log_growth)` 数值。负log-growth下溢至−1仍可计算，现金年化零也必须为数值。没有看到null就跳过，没有调用生产 `metric_summary`。
+
+6个新增CLI回归：完整12成员/场景溢出报告通过全部账本/分期核验；正/零/负可表示年化被误写null时拒绝；应溢出却给有限数值时拒绝；可表示但数值错误仍拒绝。篡改测试同步更新原summary、comparison副本/CSV及所有相关SHA，确保失败确实由独立指标判断而不是旧哈希/复制不一致引起。原199个测试全部保留。合成fixture仅检验正确性，不是盈利证据。
+
+### 验证与历史证据保护
+
+锁定安装 `uv sync --locked --extra test` 后全套 **205 passed，0 failed，0 skipped**；`compileall src tools`、qfs/compare/核账工具CLI help与 `git diff --check` 通过。
+
+现成真实报告只读复核：2020-02的 `runs/compare-aaadgj0m/` 与366天的 `runs/compare-6k7ms7fi/`，全部24组交易、每分钟账户、完整日Sharpe/年化/回撤及分期核账通过。两目录全部52文件SHA与9e4508b先前记录逐个相等，历史报告/输入/验证JSON均不覆盖；新证据仅保存于忽略目录 `.local/v2-annualized-fix-{feb,long}-verification.json`。本次只是重新核账现有报告，不把单次核账伪称新一轮重复性验证。
+
+### 基线远端 CI
+
+基线 `9e4508b87779f6c564006e3c6a99bdcc5ddd40a0` 推送后 **Offline tests 已成功**：[GitHub Actions run 38249983169](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38249983169)。本轮通过GitHub CLI核对headSha、completed/success及锁定安装、pytest、编译、CLI步骤均成功。这更新了下文初次交付时“远端尚未运行”的历史状态；**新补修仅本地提交，未推送，不能将基线CI成功当作新提交远端CI已运行**。
+
+所有可完成补修及复核已完成，等待用户最终验收。无新增依赖/文档体系，不提交行情、生成报告或本机配置。仍保留float64/分钟采样/不完整保证金模型和旧已见数据非独立OOS的限制；年化null只表达无法在既定数值范围表示，不代表策略或账本失败。
+
 ## V2 第一阶段验收（基线 ae72a73）
 
 本轮从已验收并已推送的 `ae72a73efa0887077c17156b4082be65290ddf79` 的干净 main 开始；fetch确认远端相同。保留用户修改，不reset，旧QuantForge只读。先新增 `V2_SPEC.md`、更新AGENTS授权范围，再实现；V1_SPEC.md、Funding日程/容差、策略信号、账户/成交顺序和风险采样未放松。
@@ -15,7 +45,7 @@
 | 原始报告 / 可复核元数据 | 同一V1 report writer；12×4原报告＋4比较文件，稳定相对路径及完整SHA | 完成 |
 | 成员失败 / 原子输出 / 确定性 | 非正权益及文件系统失败非零；清理staging，无子集成功；52文件重复 | 完成 |
 | V1/Funding回归 | 全部原165测试保留；2020-02财务和CSV与ae72a73输出完全一致 | 完成 |
-| 最小CI | `.github/workflows/tests.yml`，Python3.12 / uv.lock / pytest及编译，不依赖行情 | 已配置，本地同命令通过，未声称远端已运行 |
+| 最小CI | `.github/workflows/tests.yml`，Python3.12 / uv.lock / pytest及编译，不依赖行情 | 基线9e4508b远端CI已成功，链接见补修记录；新补修尚未推送 |
 | 本机2020-02 / 较长完整区间 | 全部24组真实账本和分期核账；按数据质量事先选择366天 | 完成，探索性而非独立OOS |
 
 ### 自动测试与新增模块
@@ -76,9 +106,9 @@ uv sync --locked --extra test
 
 ### 交付边界 / 未完成项
 
-本轮所有可完成的功能、测试、真实运行及核账均完成；唯一尚未实际执行的是**远端GitHub Actions**，因为本轮按要求只本地提交、不推送，不能伪造CI记录。12个月是预先固定的资源上限，不代表验证全部2020～2026。仍是旧已见数据、有限窗口、常数成本/1m成交、float64及不完整保证金模型，非独立OOS、非显著性或盈利证明；分钟内风险仍可能漏采样。
+初次本地交付时功能、测试、真实运行及核账完成，远端CI尚未执行。此后9e4508b已按用户要求推送且GitHub Actions成功（链接见补修记录）；本次新补修仍按要求只本地提交、不推送。12个月是预先固定的资源上限，不代表验证全部2020～2026。仍是旧已见数据、有限窗口、常数成本/1m成交、float64及不完整保证金模型，非独立OOS、非显著性或盈利证明；分钟内风险仍可能漏采样。
 
-行情、报告、本机配置和质量/核账JSON留在Git忽略目录，不提交。旧仓库HEAD及工作区未变；本轮仅本地代码提交，等待验收后再决定推送。
+行情、报告、本机配置和质量/核账JSON留在Git忽略目录，不提交。旧仓库HEAD及工作区未变；原V2交付9e4508b已获准推送，新补修仅本地提交，等待用户最终验收。
 
 ## V1 交付范围（历史记录）
 
