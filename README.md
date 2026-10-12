@@ -1,6 +1,6 @@
 # QuantForge-Strategies
 
-BTCUSDT Binance U 本位永续的**本地离线历史回测 / 比较 CLI**。V1 成交、账户及数据契约：[docs/V1_SPEC.md](docs/V1_SPEC.md)；本轮比较扩展：[docs/V2_SPEC.md](docs/V2_SPEC.md)。支持 4H EMA 交叉与布林带均值回归，共用单仓、1m 执行与 Mark Price 估值引擎；不联网、不连接账户、不下单。
+BTCUSDT Binance U 本位永续的**本地离线历史回测 / 比较 CLI**。V1 成交、账户及数据契约：[docs/V1_SPEC.md](docs/V1_SPEC.md)；本轮比较扩展：[docs/V2_SPEC.md](docs/V2_SPEC.md)。支持 4H EMA 交叉与布林带均值回归，共用单仓、1m 执行与 Mark Price 估值引擎；回测离线，独立acquire可访问公开官方存档，不连接账户、不下单。
 
 ## 安装与运行
 
@@ -16,7 +16,7 @@ uv sync --locked --extra test
 .venv/bin/qfs compare --config configs/compare.json
 ```
 
-示例配置需要先准备下述真实本地文件；可用独立官方原始存档prepare或可选旧canonical适配。仓库不包含大体量行情，也不提供下载器或用合成数据演示盈利。`uv.lock` 固定依赖解析结果。
+示例配置需要先准备下述真实本地文件；可用独立官方原始存档prepare或可选旧canonical适配。仓库不包含大体量行情；独立acquire只获取指定官方存档，不用合成数据演示盈利。`uv.lock` 固定依赖解析结果。
 
 ## V2：统一探索性历史比较 / 分期验证
 
@@ -146,7 +146,16 @@ manifest为JSON：`{"symbol":"BTCUSDT","archives":[...]}`。每项仅有 `kind`�
 
 2月完整输入需要合约1月/2月（1月7日起预热）、Mark及Funding的2月/3月（3月1日证据）；6月窗口需要相应全部月及end边界月。缺存档/缺分钟/重复/无效值/Funding Mark时失败，不补值或改策略。输出4个标准Parquet＋provenance.json，normalized_files.path相对新目录；将provenance完整注入自己的backtest/compare配置并按上述核账工具复核。
 
-本轮优先复用本机已核验官方原始存档，**无自动下载器、无canonical运行依赖**。CHECKSUM及URL是来源记录/完整性核验，不等于独立签名认证。支持范围仍为Funding `[2020-01-01,2026-08-01)`；旧已见历史属性不因独立准备而改变。真实对照及目录见DATA_AUDIT/VALIDATION。
+优先复用本机已核验官方原始存档，**无canonical运行依赖**。取数独立于prepare/回测：
+
+```bash
+.venv/bin/qfs acquire --start 2024-03-01T00:00:00Z --end 2026-08-01T00:00:00Z \
+  --cache data/official-cache --output .local/acquisition
+# 可选 --reuse <只读raw根目录>（其下futures/um/monthly/...）或 --offline
+# manifest: .local/acquisition/manifest.json；请求/实际/失败: acquisition.json
+```
+
+自动请求600小时预热及范围内必要Funding/Mark结束边界，ZIP/CHECKSUM/SHA/CRC验证后才发布缓存。合法缓存只读复用；损坏缓存拒绝、不覆盖；缺对象才访问官方HTTPS，连接/每次读取30秒、总传输约120秒上限、最多两次完整下载，不续传。失败仍保存对象记录并返回非零；manifest只含实际取得对象，不能视作连续覆盖。CHECKSUM及URL是来源记录/完整性核验，不等于独立签名认证。支持范围仍为Funding `[2020-01-01,2026-08-01)`；旧已见历史属性不因独立准备而改变。真实对照及目录见DATA_AUDIT/VALIDATION。
 
 ## 从旧 QuantForge 只读转换
 
@@ -214,6 +223,6 @@ PY
 
 ## 已知模型限制
 
-1m 市价近似、常数滑点与显式假定的费率；没有订单簿、排队、流动性、部分成交。没有数量步进、最小名义金额、再平衡、完整保证金、维持保证金或强平费用；**不具备实盘保证金风险精度**。float64 计算会有舍入误差。Funding 计划与固定 0～+47ms 容差仅适用于上述已核验历史范围，其他时期必须另行核验，不能自动放宽。没有 ML、搜索、多资产、Web、数据库服务、行情下载或实盘连接。
+1m 市价近似、常数滑点与显式假定的费率；没有订单簿、排队、流动性、部分成交。没有数量步进、最小名义金额、再平衡、完整保证金、维持保证金或强平费用；**不具备实盘保证金风险精度**。float64 计算会有舍入误差。Funding 计划与固定 0～+47ms 容差仅适用于上述已核验历史范围，其他时期必须另行核验，不能自动放宽。没有 ML、搜索、多资产、Web、数据库服务或实盘连接；仅独立acquire可下载限定的官方历史存档。
 
 验收映射与验证结果见 [docs/VALIDATION.md](docs/VALIDATION.md)。

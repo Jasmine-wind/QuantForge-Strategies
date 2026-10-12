@@ -1,5 +1,13 @@
 # V1 / V2 验收记录
 
+## 独立官方研究四阶段（基线324acadd，本轮进行中）
+
+初始HEAD为用户指定基线，工作区干净，旧仓库HEAD d0e6a5d/干净且只读。先在V2_SPEC第9节固定29个月完整扫描规则，再实现，无策略参数/账户/Funding变更、不自动推送。
+
+阶段一：新增acquire独立官方月度ZIP/CHECKSUM入口，仅标准库网络；缓存SHA/文件名/member/CRC通过才发布，复用不覆盖，损坏拒绝并记录，有限超时/重试且拒绝206/Content-Range/短Content-Length，不拼接残片。请求/实际/失败独立记录。11项新增固定fixtures测试＋15项prepare测试共26通过。自审覆盖只读源目录保护、HTTP永久错误不重试、临时缓存失败清理和合法重复字节一致。
+
+官方README通过curl有限超时取得（web工具因本机fake-IP保护拒绝，未无限重试），确认USD-M毫秒Kline字段及相邻.CHECKSUM约定；原Funding/Mark格式沿用已核验原始存档。本机证据 `.local/independent/binance-public-data-README.md`。实际acquire固定范围请求88对象（29月×3＋合约2024-02预热），88均复用已核验原始ZIP，无缺失/无新下载；记录 `.local/independent/acquisition/`，不意味着分钟连续，待完整质量扫描。新工作尚未推送，基线CI不是新提交CI。
+
 ## HTML哈希清单完整性补修（基线7355eb2）
 
 本轮仅补修browse完整性校验，基线 `7355eb25b2a438af779d5bd19c5f6ac049b5e4a3` 已由用户授权推送。初始main及旧QuantForge工作区干净；无新功能/依赖/数据准备或策略重跑，保留全部269测试、V1/Funding/财务口径和compare/study原52/211产物。新修复仅本地提交，不自动推送。

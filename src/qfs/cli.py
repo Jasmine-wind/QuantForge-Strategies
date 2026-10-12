@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import zipfile
 
+from .acquire import acquire
 from .compare import load_compare_config, run_comparison
 from .browse import export_html
 from .config import Config
@@ -23,6 +24,11 @@ def main(argv=None):
     compare.add_argument("--config", required=True)
     study = sub.add_parser("study", help="Run fixed nonoverlapping six-month exploratory windows offline")
     study.add_argument("--config", required=True)
+    acquisition = sub.add_parser('acquire', help='Fetch only required official BTCUSDT monthly objects; prefer checked caches')
+    for name in ('start', 'end', 'cache', 'output'):
+        acquisition.add_argument('--' + name, required=True)
+    acquisition.add_argument('--reuse', action='append', default=[], help='Read-only raw root (repeatable)')
+    acquisition.add_argument('--offline', action='store_true', help='Record missing objects without network access')
     preparation = sub.add_parser('prepare', help='Prepare checked official monthly archives offline')
     for name in ('manifest', 'start', 'end', 'output'):
         preparation.add_argument('--' + name, required=True)
@@ -31,6 +37,13 @@ def main(argv=None):
     browser.add_argument('--output', required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == 'acquire':
+            record = acquire(args.start, args.end, args.cache, args.output, args.reuse, args.offline)
+            print(Path(args.output).resolve())
+            if record['failed_objects']:
+                print(f"qfs: {len(record['failed_objects'])} objects unavailable; see acquisition.json", file=sys.stderr)
+                return 1
+            return 0
         if args.command == 'browse':
             print(export_html(args.run, args.output))
             return 0
