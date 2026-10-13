@@ -1,4 +1,8 @@
 """Local acceptance check of real CLI outputs; no performance/inference claim."""
+# Refuse before any replay or evidence write, also when this legacy script is imported.
+if not __debug__:
+    raise RuntimeError('audit: optimized Python is unsafe; remove -O/-OO or PYTHONOPTIMIZE')
+
 import argparse
 import json
 from pathlib import Path

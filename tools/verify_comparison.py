@@ -1,4 +1,8 @@
 """Independent comparison acceptance: signals/timing, ledgers, periods and repeatability."""
+# Refuse before report reads, replay subprocesses or output (including imported APIs).
+if not __debug__:
+    raise RuntimeError('audit: optimized Python is unsafe; remove -O/-OO or PYTHONOPTIMIZE')
+
 import argparse
 import json
 import math

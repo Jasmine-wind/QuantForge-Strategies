@@ -2,6 +2,10 @@
 
 This is acceptance tooling, not an alternative execution engine.
 """
+# Guard the module boundary, not only CLI main: direct callers need assertions too.
+if not __debug__:
+    raise RuntimeError('audit: optimized Python is unsafe; remove -O/-OO or PYTHONOPTIMIZE')
+
 import json
 import math
 
