@@ -1,5 +1,57 @@
 # V1 / V2 验收记录
 
+## 第一阶段可靠性审查（基线 ea94629）
+
+开始时本地 `main` / GitHub API 的远端 main 均为 `ea9462964f0dc851f877cd124dc2599e4b9c6fce`，工作区干净。SSH ls-remote 连接失败，改用 GitHub API 核实；基线 [CI 38348725461](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38348725461) 为 completed/success，但仅 Python 3.12。本轮只本地提交、不推送，**没有本轮提交的远端 CI 结果**。先完整阅读六份必读文档，再沿执行/数据/选择/报告/核账链路审查；主线程按规范与实现两轴自审，当前无子代理工具，不冒充独立外部审查。
+
+### 审查发现与处置
+
+| 优先级 / 状态 | 证据、影响与处置 |
+|---|---|
+| P0：未确认新的金融计算缺陷 | `strategies/engine/data/funding/report/periods` 对照 V1/V2：完成 4H 的因果指标、同点 Funding 优先与 +ms 实际顺序、1m Open / 延迟反向、双向数量/费用/滑点/Funding、Mark 估值、终点 close、非正权益锁定及 UTC 分期均有既有手算/边界回归。本轮完整测试和下述真实独立核账复核，不据此声称穷尽所有错误。 |
+| P1：确认并修复版本/安装覆盖缺口 | 原 workflow 只有 3.12，无 wheel 安装执行步骤。部分 CLI 测试硬编码当前目录 `.venv/bin/qfs`，在其他虚拟环境下可能测试错解释器。改 3.11/3.12 matrix、显式 `UV_PYTHON` 和 sync `--python`，断言真实 `sys.version_info`；使用 `sys.executable -m qfs.cli`，增强原两策略 CLI 测试的任意工作目录及报告 runtime 断言。 |
+| P1：确认并修复官方 study 来源绑定时间窗口 | `StudyConfig.load` 先验证准备文件 SHA；但 `run_study` 后续加载文件只与加载时的新 SHA 比较，未再关联预选来源 SHA。配置校验之后被替换的合法 Parquet 可发布 completed study，导致实际输入与来源声明矛盾；多窗运行扩大了后窗暴露时长。现在每窗 `load_data` 后、任何成员执行前，对比加载快照 `data.files` 与已绑定 `normalized_files` 的 SHA；不额外读取或重写行情，错误包含窗口/文件并清理 staging。 |
+| P1：本轮未复现其他高优先级缺陷 | 审读下载进程 kill/communicate/重试/残片和错误传播，保留真实 loopback 慢头/滴流/完整响应/永久失败测试。prepare、compare、study、diagnose、browse 的既有失败注入、完整清单、来源错配及确定性测试继续通过。acquire 按契约可发布明确的失败对象记录并非部分成功研究报告；不改这一行为。 |
+| P1：验证范围风险，非已确认计算错误 | 独立账本重建现金事件而非调用 Account/engine/metric_summary；官方选择核验独立重放，不调用生产选择器。本次反例也被既有独立来源核验拒绝。但账本以报告交易时点为输入，不独立重算 EMA/布林触发，因此不能把“独立核账”称为独立信号审计。 |
+| P2：未确认需要重构的阻塞问题 | 模块边界仍适合小型离线 CLI；仅抽取测试 fixture 复用，无新增生产抽象/依赖，不为重构而重构。 |
+
+窗口选择仍只按数据质量；canonical 身份、旧四窗早停和官方完整29月扫描均未改。终点强制平仓仍为 `end_of_test`，不是交易所保证金强平；分钟内 Mark/Funding 波动和保证金模型限制不是本轮新发现的计算缺陷，不静默更改采样或金融口径。
+
+### 失败 → 最小修复证据
+
+1. 先增强原 CLI 测试，在临时工作目录调用：原硬编码入口 **2 failed**（FileNotFoundError），日志 `.local/reliability-review/red-cli-environment.log`；改用当前解释器后 CLI/Funding 定向 **57 passed**，原财务断言全部保留。
+2. 官方 study 最小合法研究长度为6完整月。复用固定合成网格，先 `StudyConfig.load`，再将 Funding rate 从 `.0001` 改成 `.0002`（时间、计划、数值仍合法），随后 `run_study`。修复前 **1 failed / DID NOT RAISE**（39.83秒），实际发布成功；日志 `red-source-binding.log`。原代码的结束 SHA 检查只证明“加载以来未变”，不能证明“还是预选准备文件”。
+3. 生产修复仅 `src/qfs/study.py` 的6行快照绑定检查。首回归 **1 passed**（1.74秒）；扩展四类规范输入替换及公开 CLI 文件系统边界替换，共 **5项新增**，覆盖非零退出、无成功目录/staging及保留既有证据。官方来源模块定向 **24 passed**，无引擎 mock。
+4. 在隔离 `git archive ea94629 src` 快照中复核公开 CLI 回归，原代码返回0并发布，测试 **1 failed**（41.72秒）；不 reset 当前工作区。`red-source-cli-baseline.log` 和 `red-source-impact.json` 记录实际加载/来源两个不同 SHA。既有 `tools/verify_study.py::verify_official_link` 对此报告明确拒绝 `official normalized hash mismatch`，未与生产端共享这一遗漏。所有反例仅是正确性合成数据，不是历史收益。
+
+可重放修复回归：
+
+```bash
+.venv/bin/python -m pytest -q tests/test_official_scan.py
+.venv/bin/python -m pytest -q tests/test_reports_cli.py tests/test_funding_schedule.py
+```
+
+### 本轮验证（不引用旧测试充数）
+
+- Python **3.12.13**：`uv sync --locked --extra test --python 3.12`；完整 **390 passed / 0 failed / 0 skipped**（385原有＋5新增），721.63秒，干净功能提交 `85092ed`。`full-312.log`。Pandas 3.0.6 / NumPy 2.5.4 / PyArrow 24.0.0 / pytest 9.1.1。
+- Python **3.11.15**：独立 `.local/reliability-review/venv-311`，断言实际解释器；锁定同步后完整 **390 passed / 0 failed / 0 skipped**，717.05秒，`full-311.log`。同一实现提交85092ed，当时仅 README/VALIDATION 待提交。Pandas 3.0.6 / NumPy **2.4.6** / PyArrow 24.0.0 / pytest 9.1.1；NumPy 差异来自原锁文件的 Python marker，未改版本以适配测试。两版本分别验证确定性，不宣称跨 Python/依赖版本全部文件同字节。
+- 环境获取限制如实保留：3.11解释器官方传输及依赖安装曾超时/缓慢，未把这些尝试记作测试成功。最终从官方取得完整解释器；终止缓慢的包下载后，由镜像取得上述三份 cp311 wheel，**逐份 SHA 与 uv.lock 完全一致**，从已核验本地 wheel 预填环境，再 `uv sync --locked --extra test --python <3.11解释器>` 成功。锁文件不变；记录 `wheels-311/locked-artifacts.json`、`sync-311-interrupted.log`、`sync-311.log`，不涉及行情 acquire 或其下载政策。
+- 3.12 离线构建 wheel、安装覆盖独立环境的 editable 包；在 `/tmp` 用该解释器 `-I` 运行 **44项** prepare/真实下载/诊断浏览/compare 测试，再运行 **5项**新增来源回归，合计 **49 passed**。断言导入位于该环境 site-packages，内置 `browser.html` / `_download.py` 均存在；全部8个子命令 help 通过。wheel SHA `036a518282fbaeec2b4006e3ae2e7a352f37daae9e60d0e3d76b171cf41bf0b0`；证据 `wheel-identity-312.json`、`wheel-tests-312.log`、`wheel-source-tests-312.log`。
+- 3.11 同样离线构建并实际安装 wheel，在 `/tmp` 执行上述 **49项全部通过**（27.24秒），资源/导入位置、全部 CLI help 和编译通过。wheel SHA `045746fcf51ecd5609c60303f8b3b527aa70ef276a985986d6feb24e329dec3c`；`wheel-identity-311.json`、`wheel-tests-311.log`、`verify311.log`。两版本全套与 wheel 测试均无失败/跳过；本轮已完成验证后未无意义重复全套。
+- CI 同样先锁定运行/测试依赖并全测，之后 build wheel、`uv pip install --no-deps --reinstall`，不重新解析运行依赖，不再用 uv run 复原 editable 包；从 runner 临时目录验证 wheel 导入、资源、CLI和44项定向测试。没有新增依赖或修改 `uv.lock` / `pyproject.toml`。构建后端仍沿用既有 `setuptools>=68`；本轮不声称跨构建环境 wheel 字节恒定。
+- `compileall -q src tools tests`、CLI、`git diff --check`通过。下载仍由本地 HTTP fixtures 验证，没有新取数、HTTPS/TLS或其他 OS 传输实测。UI/模板未改，不声称新增浏览器视觉验收。
+- 只读复核12棵旧/新报告树和其全部规范输入 SHA，与原独立证据一致；来源中的规范 SHA 也逐项一致，两份选择记录未变。`preservation.json/log`。对真实 `runs/study-nk39lxqo` 再次运行 `verify_study --run`，三窗 **36组**逐笔、逐分钟、分期、年化 null、来源关联和顶层核验全部通过；`real-study-audit.json/log`。**本次没有重新运行真实策略或新增真实重复性声明**，原159/211/52文件历史产物均未覆盖。
+
+全部新日志/环境/合成及只读核账证据仅在 Git 忽略的 `.local/reliability-review/`；测试临时目录不作为持久历史证据。策略、参数、账户、成交、费用、Funding、财务指标、历史报告格式、CLI 参数及依赖不变。生产变更只拒绝原本不应接受的来源错配；原始数据、历史报告、诊断、HTML和核账记录没有改写。
+
+### 边界与下一阶段
+
+- P0：无尚未修复的已复现新金融缺陷；继续保留分钟采样、固定 Funding 范围/容差及非独立 OOS 限制，不以此次通过证明实盘正确性。
+- P1：新远端双版本 CI 须经用户允许推送后实际观察；目前仅本地等效验证。下一阶段最值得做的是独立信号/成交时序负例审计（不复用生产策略实现），补上账本审核的范围边界，而非新增策略或调参。SHA 不是来源签名/预存时间证明，读前后摘要也不是文件锁，不能声称防御恶意反复改写并恢复的所有竞态。
+- P2：其次可评估构建后端固定版本及遗留核账脚本的环境绑定；均未在本轮扩大实现。未验证其他 Python/OS 组合。旧 QuantForge 只读，最终 HEAD 仍为d0e6a5d且工作区干净。
+
+本轮实现提交：`ceb3f62`（双版本/安装CI）、`85092ed`（加载快照来源绑定）；最终证据文档提交及 HEAD 以 Git 记录为准，避免文档自引用。仅 main 本地提交，无分支/PR/自动推送。
+
 ## 下载整体期限与终点强制平仓文案补修（基线d4136d7）
 
 本轮仅修这两项；初始HEAD为`d4136d758bbd9665b9f1f756e35662cdbcd06d79`且工作区干净。该基线已推送，CI [38341960958](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38341960958) 已成功；本轮GitHub CLI复核headSha=d4136d7、completed/success（`.local/deadline-fix/baseline-ci.json`）。新补修只本地提交，不自动推送，不能将基线CI计作新提交CI。

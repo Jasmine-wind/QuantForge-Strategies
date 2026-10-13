@@ -4,11 +4,11 @@ BTCUSDT Binance U 本位永续的**本地离线历史回测 / 比较 CLI**。V1 
 
 ## 安装与运行
 
-Python 3.11+；本次验证使用 Python 3.12。运行依赖仅 Pandas、NumPy、PyArrow（Parquet），测试使用 pytest。
+Python 3.11+；本轮实际验证 Python 3.11.15 / 3.12.13，结果及限制见 [VALIDATION.md](docs/VALIDATION.md)。运行依赖仅 Pandas、NumPy、PyArrow（Parquet），测试使用 pytest。
 
 ```bash
 uv venv --python 3.12
-uv sync --locked --extra test
+uv sync --locked --extra test --python 3.12
 # 或 python -m venv .venv && .venv/bin/pip install -e '.[test]'
 .venv/bin/pytest -q
 .venv/bin/qfs backtest --config configs/ema.json
@@ -64,7 +64,7 @@ PY
   --raw-root ../QuantForge/data/raw/binance --output .local/v2-window-selection.json
 ```
 
-旧数据依旧已见；所有结果仅为探索性历史比较 / 分期验证，既无独立 OOS，也不证明盈利。最小 GitHub Actions 使用 uv.lock + 固定合成正确性 fixtures，不需要本机行情；尚未推送的新工作不能声称远端 CI 已执行。
+旧数据依旧已见；所有结果仅为探索性历史比较 / 分期验证，既无独立 OOS，也不证明盈利。GitHub Actions 使用 Python 3.11 / 3.12 矩阵，显式绑定并断言实际解释器；按 uv.lock 安装运行/测试依赖，全测后构建并安装 wheel，在仓库之外运行 CLI 和定向集成测试。固定合成正确性 fixtures 不需要本机行情；尚未推送的新工作不能声称远端 CI 已执行。
 
 ## V2 第二阶段：固定策略多窗口 study
 
@@ -222,7 +222,7 @@ with Path('.local/independent-study.json').open('x') as f:
 # --config核账入口完整执行两次并比较；--run <已完成study>只核账，不声称重复性
 ```
 
-官方身份记录市场/转换契约、已核验URL/ZIP SHA/CHECKSUM SHA；不会硬填canonical dataset_identity。窗口规范文件摘要和所需原对象必须与选择证据关联。独立核账自行验证全29月完整性和来源关联，不调用生产选择器。SHA不是来源签名或预存时间的独立证明。各窗独立初始账户，不拼接或合并年化；固定成员、成本场景与策略参数不变。
+官方身份记录市场/转换契约、已核验URL/ZIP SHA/CHECKSUM SHA；不会硬填canonical dataset_identity。窗口规范文件摘要和所需原对象必须与选择证据关联；每窗加载后、运行任何成员前，再将实际加载快照 SHA 与准备来源 SHA 核对，拒绝配置校验后被替换的文件。独立核账自行验证全29月完整性和来源关联，不调用生产选择器。SHA不是来源签名或预存时间的独立证明。各窗独立初始账户，不拼接或合并年化；固定成员、成本场景与策略参数不变。
 
 ## 从旧 QuantForge 只读转换
 
