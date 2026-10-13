@@ -1,7 +1,7 @@
 """Independent V1 signal/timing audit for the four fixed V2 comparison members.
 
-Only Parquet decoding uses pandas: EMA is scalar recursion, Bollinger is a
-fresh 20-close mean/population variance. No production indicators, decisions,
+Pandas handles Parquet/tables and timestamps, not indicator calculations.
+EMA is scalar recursion; Bollinger uses a fresh 20-close mean/population variance. No production indicators, decisions,
 loader or engine; no fills, quantities, Funding, costs or account calculations.
 Only completed reports are eligible (the caller's Ledger Audit checks status).
 """

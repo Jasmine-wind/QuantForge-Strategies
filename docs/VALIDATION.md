@@ -1,5 +1,59 @@
 # V1 / V2 验收记录
 
+## 独立信号与成交时序审计（实际基线 f4c291f）
+
+本轮不是工程可靠性加固的重复验收。用户预期 HEAD 为 `33d608c`，实际开始于干净 `main` 的 `f4c291f3ca8de36e683527a287db84147ba4ed98`；多出的提交仅记录推送授权，保留不 reset。此次明确要求暂不推送，覆盖此前的持续授权。开始时没有独立 Signal Audit：旧 `ledger.reconcile` 使用报告提供的交易方向/时点重建账本，旧 `verify_comparison` 不重算策略信号。
+
+### 独立算法、时序与职责
+
+新增 `tools/signal_audit.py::audit_signals`，由 `verify_comparison.verify` 在账本核验后逐成员调用，`verify_study.verify` 逐窗口继承相同检查；拒绝时带窗口路径、场景、成员、交易序号、字段与预期/报告值。新的审计 JSON 每组增加 `signal_audit`（版本、4H SHA、完成K线数、预期交易序列）；不改原 comparison/study/raw report 文件或格式。审计输出原有顶层 `code` 仍指原报告生产代码，不冒称审计代码身份；本轮审计实现以以下功能提交标识。
+
+- 输入是原 `bars_4h` Parquet 的同一字节快照：先 SHA 与已由账本校验的 manifest 绑定，再从该缓冲区解码。自行检查时间顺序/唯一性、UTC 4H 对齐、连续覆盖、有限正 close 和预热；不调用生产 loader、`indicators()`、`decision()` 或 `run_backtest()`。生产 `qfs` 包完全不可导入的隔离子进程测试仍可完成审计。
+- EMA20/50：用**第一根实际提供的 close**初始化两条 EMA，逐项 `E ← E + (C−E)×2/(span+1)`，即 adjust=False；保留全部提供的前史，不只截最后150根重新播种。至少150根在 start 时已完成的预热；前一根 fast≤slow、当前 fast>slow 为 Long，反向不等式为 Short。预热只更新指标，仓位从 Flat 开始，不继承窗口前交叉。
+- Bollinger20/2：每个独立20 close窗口以 `math.fsum` 算均值，再重算 `sqrt(sum((C−mean)^2)/20)`（总体 ddof=0），上下轨为 mean±2σ；不复用 Pandas ewm/rolling 指标。上一根必须在闭区间轨道内，当前严格穿出外轨才可从 Flat 入场；Long 的上一 close<上一中轨且当前 close≥当前中轨时退出，Short 不等式为 > / ≤，均标记 `strategy_exit`。同根退出不反手，持续轨外不重复入场。
+- 时间为 `open_time+4H`，仅处理 `[start,end)` 内完成的K线。首次入场在信号 T；EMA 反向先在 T 以 `reverse_signal` 退出，反向入场在 T+1分钟，若该时点≥end 则取消。相邻信号至少间隔4H，因此这1分钟内不会有另一根完成K线改变目标。end 当点的信号不执行；仍有持仓则在 end 记录 `end_of_test`，不是 end−1分钟。末分钟 close 的参考价/成交价仍由账本核验。
+- 逐笔、按原顺序严格检查 `entry_time`、`exit_time`、`direction`、`exit_reason` 及交易笔数，不容许缺笔、多笔、同分钟反手。四成员参数独立固定为 V2，不能篡改成员配置来解释错误信号；现金/永续基准分别检查空序列/start→end 单笔多头。Signal Audit 不计算仓位数量、费用、Funding、PnL 或权益；`tools/ledger.py` 未改，职责独立。
+
+### 失败反例与新增回归
+
+1. 任意临时工作目录运行旧 `verify_comparison.py --config`，先得到 **1 failed / FileNotFoundError: .venv/bin/qfs**；改用 `sys.executable -m qfs.cli` 后，通过当前解释器生成两份逐字节相同的52文件比较，并断言报告 Python runtime。没有改其他遗留工具或 CI。
+2. 合成恒定1m价格、零费用/滑点/Funding的已完成比较中，分别篡改首笔 entry_time +1分钟、exit_time −1分钟、Long→Short（同步改 signed_quantity）、`reverse_signal`→`strategy_exit`。正确重算 holding_hours/average_holding_hours，更新 summary 副本以及 trades/summary SHA；未变化的财务汇总/CSV 不伪造变更。原账本与 `browse.load_view` 完整清单/副本校验都通过。
+3. 新测试先在旧代码上得到 **4 failed**：预期拒绝，但原完整验证器四次都返回0并发布验证 JSON。随后在相同持久样本上以 `git show f4c291f:tools/...` 保存的原验证器重新运行，依旧四次返回0；新验证器四次返回1，明确分别报上述四字段的 `Signal Audit` 错误，没有发布新成功证据。对应路径和错误见 `.local/signal-audit/counterexamples.json`、`red-signal.log`、`old-*.log`、`new-*.log`。这不是陈旧 SHA 导致的失败，也不是历史收益证据。
+4. 六个月合成 study 回归还替换 EMA 正常反向退出原因，同时刷新 comparison 成员摘要、窗口52项清单及 study 顶层所有受影响摘要；旧账本和完整 study 浏览完整性检查仍通过，而公开 `verify_study --run` 因 `window-01` 的退出原因拒绝。没有 mock 账户/引擎。
+5. 新增测试包含手算双向 EMA 反向、T+1=end 取消、T=end 排除、初始 Flat、保留首个前史 EMA 种子/非 adjusted 权重、Boll ddof=0 与 ddof=1 可区分阈值、双向中轨相等退出、同根禁止反手/新穿越再入场、未来未完成K线、缺/多笔、错误参数及输入/SHA。原 study 集成测试额外断言每窗12组均有通过的 Signal Audit，没有删除旧断言。
+
+### 本轮新执行验证
+
+功能提交 `8312c87fe1fef5af65292e4e1f92317c2f14dd27`、工作区干净时开始双版本完整测试；不是引用上一轮390项结果。两环境分别重新 `uv sync --locked --extra test`，实际解释器、导入位置及依赖见 `.local/signal-audit/runtime-{311,312}.json`。
+
+| 验证 | 新执行结果 / 证据 |
+|---|---|
+| Python 3.11.15 完整 pytest | **429 passed / 0 failed / 0 skipped**，948.27秒；`full-311.log` / `.exit=0` |
+| Python 3.12.13 完整 pytest | **429 passed / 0 failed / 0 skipped**，922.36秒；`full-312.log` / `.exit=0` |
+| 保留与新增 | 保留原390项；新增39项：`test_signal_audit.py` 38项、`test_verify_comparison.py` 1项；原 study 断言另增强 |
+| 最终注释复核后定向 | 两版本各 **44 passed / 1 deselected**（有意不重复六个月 study 负例；已在两次全套中通过），12.44/12.93秒；`final-targeted-{311,312}.log` |
+| 已安装 wheel 的兼容性 | 既有3.12 wheel 环境中先确认 site-packages 导入及全部生产 Python 文件 SHA 与当前 src 相同，再从 `/tmp` 用 `-I` 新执行两审计测试文件：**44 passed / 1 deselected**，15.59秒；`wheel-compat-312-identity.json` / `.log`。本轮没有重新构建 wheel，也没有拿此前安装测试当新结果 |
+| 编译 / CLI | 两版本 `compileall -q src tools tests`、qfs / verify_comparison / verify_study help 通过；`--config` 仓库外重放及52文件确定性由新增回归验证；diff 检查通过 |
+
+两环境 Pandas 3.0.6 / PyArrow 24.0.0 / pytest 9.1.1；NumPy 分别2.4.6（3.11）/2.5.4（3.12），均来自原 lock。没有修改依赖或生产源码。最终文档提交仅补充本节及校正工具说明、手算注释的舍入，执行 AST 与功能提交一致（`annotation-equivalence.log`），没有测试断言或算法变更。
+
+### 真实历史只读核验（本轮实际执行）
+
+- **两版本**独立重算全部12棵既有历史报告树（22个 comparison 窗口目录，包括历史重复运行）的 **264组**信号/成交时序，全部通过且预期交易序列相同。证据 `history-signals.json` / `history-signals-311.json`。其中132组是 EMA/Boll 策略，132组是两基准的固定时序；不能把重复产物或窗口当成264个独立统计样本。
+- Python 3.12 还对下列原目录重新运行接入新审计的**完整**公开验证流程，Signal + Ledger + 分期/指标/来源关联全部通过，总计 **108组**：
+  - `runs/compare-aaadgj0m`：2020-02，12组，`history-feb.json`。
+  - `runs/compare-6k7ms7fi`：原366天比较，12组，`history-year.json`。
+  - `runs/study-g5jo08cs`：原 canonical 四窗，48组，`history-legacy-study.json`。
+  - `runs/study-nk39lxqo`：官方三窗，36组，`history-official-study.json`。
+- 上述均为 `--run`，没有重新运行真实策略、下载数据、生成新的历史收益或声称新一轮历史重复性；证据明确 `repeatability: not checked in this invocation`。`history-full.exit=0` 及各 `.log` 保存全部成员通过记录。
+- 审计前后独立重查12棵报告树、所有关联规范输入以及两份选择证据 SHA，均与原独立证据一致，前后快照完全相同；`preservation-before.json` / `preservation-after.json`。没有改写真实数据、旧报告、诊断、HTML或旧核验 JSON；旧 QuantForge 工作区仍干净。
+
+### 交付与边界
+
+- 新功能提交：`07aabb27b65499addcfa78a1b8d38f9d45e804cb`（验证器解释器绑定及失败回归）、`8312c87fe1fef5af65292e4e1f92317c2f14dd27`（独立信号审计、集成、38项回归）。文档提交 SHA 见 Git 历史/最终交付，避免自引用。所有新增本地证据位于忽略的 `.local/signal-audit/`；没有另建文档体系。
+- **仅 main 本地提交，本轮不推送，没有本轮远端 CI 结果。** `src/`、原 ledger、V1/V2、策略/参数、账户、Funding、费用、窗口选择、52/211默认产物与依赖均未改；审计证据增加字段不改变原报告契约。
+- 本轮没有已复现而未修复的验收失败。审计范围是 V2 四固定成员的已完成报告，不是通用参数搜索器或失败/部分报告执行引擎。独立浮点重算在极贴近轨道/交叉边界的其他数据上仍需逐例复核，不以容差吞掉时点/方向差异，不静默改历史。SHA 不等于来源签名，原分钟采样/保证金模型/非独立 OOS 边界保持；其他 Python/OS 组合未验证。
+
 ## 第一阶段可靠性审查（基线 ea94629）
 
 开始时本地 `main` / GitHub API 的远端 main 均为 `ea9462964f0dc851f877cd124dc2599e4b9c6fce`，工作区干净。SSH ls-remote 连接失败，改用 GitHub API 核实；基线 [CI 38348725461](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38348725461) 为 completed/success，但仅 Python 3.12。本轮只本地提交、不推送，**没有本轮提交的远端 CI 结果**。先完整阅读六份必读文档，再沿执行/数据/选择/报告/核账链路审查；主线程按规范与实现两轴自审，当前无子代理工具，不冒充独立外部审查。

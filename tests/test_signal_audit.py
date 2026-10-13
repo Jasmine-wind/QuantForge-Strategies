@@ -103,8 +103,8 @@ def schedule(config, rows):
     ('bollinger', 3, {149: 90}, [(0, 3, 'long', 'end_of_test')]),
     ('bollinger', 3, {}, [(0, 3, 'short', 'end_of_test')]),
     ('bollinger', 3, {149: 100}, []),  # equal to the outer band is not outside
-    # Last window has 90, 110, seventeen 100s, 107.6. Population upper=107.5197;
-    # sample-ddof=1 upper=107.7052 would incorrectly suppress this entry.
+    # Last window has 90, 110, seventeen 100s, 107.6. Population upper≈107.5196;
+    # sample-ddof=1 upper≈107.7051 would incorrectly suppress this entry.
     ('bollinger', 3, {135: 90, 136: 110, 149: 107.6}, [(0, 3, 'short', 'end_of_test')]),
     ('bollinger', 3, {148: 90, 149: 90}, []),  # consecutive outside closes, not a crossing
     ('bollinger', 241, {140: 110, 149: 90, 150: 100}, [(0, 240, 'long', 'strategy_exit')]),
