@@ -18,6 +18,8 @@
 
 `data/independent-window-{01,02,03}`及`-repeat`各5文件完全一致。干净代码6f6516b运行两次study：`runs/study-nk39lxqo` / `study-cs9jwldu`，各159文件全字节相同；36组全部独立交易/分钟账户/分期/年化null及选择来源核账通过。每窗独立10000初始、50%名义仓位、1倍上限、base fee/slippage各0.0005，固定四成员三场景。证据/manifest/配置/日志 `.local/independent/`，旧数据/报告/选择保留不覆盖，所有生成文件Git忽略。
 
+最终新增/旧四窗/2月/年度诊断和离线HTML位于`.local/independent/delivery/`；来源绑定与重复摘要见`acceptance.json`，原12棵报告树完整SHA保全见`preservation.json`。新三窗最终独立复核见`.local/independent/study-final-audit.json`；详细方向/成本/集中度事实与限制见VALIDATION本轮记录。没有跨窗合并净值、收益或年化。
+
 仅在 QuantForge-Strategies 写入。旧仓库 `../QuantForge` 只读；检查时 Git HEAD 为 `d0e6a5d1ad1e18a711767709d5b827be8af38f7e`，工作区干净。没有复制其研究架构、模型、标签或合成模拟器。
 
 ## 找到的真实数据

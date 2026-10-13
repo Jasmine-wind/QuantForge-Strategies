@@ -1,12 +1,12 @@
 # V1 / V2 验收记录
 
-## 独立官方研究四阶段（基线324acadd，本轮进行中）
+## 独立官方研究四阶段（基线324acadd，本轮完成）
 
 初始HEAD为用户指定基线，工作区干净，旧仓库HEAD d0e6a5d/干净且只读。先在V2_SPEC第9节固定29个月完整扫描规则，再实现，无策略参数/账户/Funding变更、不自动推送。
 
 阶段一：新增acquire独立官方月度ZIP/CHECKSUM入口，仅标准库网络；缓存SHA/文件名/member/CRC通过才发布，复用不覆盖，损坏拒绝并记录，有限超时/重试且拒绝206/Content-Range/短Content-Length，不拼接残片。请求/实际/失败独立记录。11项新增固定fixtures测试＋15项prepare测试共26通过。自审覆盖只读源目录保护、HTTP永久错误不重试、临时缓存失败清理和合法重复字节一致。
 
-官方README通过curl有限超时取得（web工具因本机fake-IP保护拒绝，未无限重试），确认USD-M毫秒Kline字段及相邻.CHECKSUM约定；原Funding/Mark格式沿用已核验原始存档。本机证据 `.local/independent/binance-public-data-README.md`。实际acquire固定范围请求88对象（29月×3＋合约2024-02预热），88均复用已核验原始ZIP，无缺失/无新下载；记录 `.local/independent/acquisition/`，不意味着分钟连续，待完整质量扫描。新工作尚未推送，基线CI不是新提交CI。
+官方README通过curl有限超时取得（web工具因本机fake-IP保护拒绝，未无限重试），确认USD-M毫秒Kline字段及相邻.CHECKSUM约定；原Funding/Mark格式沿用已核验原始存档。本机证据 `.local/independent/binance-public-data-README.md`。实际acquire固定范围请求88对象（29月×3＋合约2024-02预热），88均复用已核验原始ZIP，无缺失/无新下载；记录 `.local/independent/acquisition/`，不意味着分钟连续，完整质量扫描结果如下。新工作尚未推送，基线CI不是新提交CI。
 
 阶段二实现：scan固定29个月，复用prepare和原loader；新增路径无关official身份、窗口对象/规范文件关联校验，旧canonical分支原样保留。独立verify_study自行计算身份/所需对象和完整月范围，不使用生产选择器。14项新增测试覆盖完整缺尾扫描、原生47ms结束边界、空源/缺Mark边界、身份/规范文件/转换/范围错配，以及找到4窗仍拒绝截尾；连同prepare/旧选择/配置定向共71通过（2个长时study集成留最终全套）。
 
@@ -45,7 +45,17 @@ Chromium直接file://实测桌面1440×1000、小屏390×844，四页108个全�
 
 结论：现有布林规则整体证据较弱，EMA也未展现稳健持续超越同仓位永续基准的证据；盈利来源集中、反向方向拖累和成本脆弱性值得后续研究。仅这些固定历史/1m近似/固定费用下的账面结果，不能认定未来无效/有效或给出参数优化建议。本轮不修改策略或筛窗以改善结论。
 
-最终锁定安装/完整pytest/wheel等收尾结果待下节补入；新代码尚未推送，无新提交远端CI。
+### 最终验证与交付位置
+
+- 干净功能提交26f1042上锁定`uv sync --locked --extra test`，全套 **374 passed / 0 failed / 0 skipped**（316既有＋58新增），687.86秒。`compileall src tools tests`、全部qfs子命令help、`git diff --check`通过；无新运行依赖、uv.lock不变。完整日志`.local/independent/full-tests.log`，通过后未为延长运行重复全套。
+- 离线wheel实际安装到`.local/independent/wheel-installed/`，明确断言qfs从该安装目录加载（依赖沿用锁定环境），不是editable源码。wheel执行各CLI/help、离线缺对象acquire记录、完整29月空源scan、固定合成官方ZIP prepare→12组compare→diagnose→含诊断browse成功；故意缺诊断CSV摘要时失败且无HTML/临时残留。wheel SHA `36d30a7bd65a25b1fc2959755b9308d8e62cdb5bbe88ad1b6c2d9849045b1523`；包及日志`.local/independent/dist/`、`wheel-{build,install,smoke}.log`、`wheel-smoke/acceptance.json`。合成验证不作为历史表现。
+- 来源复核增强后，对已有新三窗报告再次`verify_study --run`逐笔/逐分钟/分期/年化null核账全36组通过，证据`.local/independent/study-final-audit.json`。这次明确不声称新增重复性；真正两次完整运行的159/159重复证据仍是`study-verification.json`。
+- **正式交付**：`.local/independent/delivery/diagnostics-{new,old,feb,annual}/`及`{new,old,feb,annual}.html`，另有各自repeat。均由干净26f1042生成；全部诊断与页面各自重复字节相同，财务records与已经浏览器实测的页面严格相同，仅诊断代码身份元数据更新。`delivery/acceptance.json`记录报告绑定及全部诊断/HTML摘要。
+- `delivery/preservation.json`核对12棵旧/新报告及重复树的完整SHA，分别对应原四窗211文件、原2月/年度/独立准备比较52文件、新三窗159文件，全部与原独立核账证据一致；旧study选择SHA未变。旧仓库HEAD仍d0e6a5d且干净、只读；旧数据/报告/页面/证据均未覆盖。
+
+分阶段本地功能提交：b5b05b4（获取）、6f6516b（独立扫描/来源）、6da6bd4（诊断）、26f1042（离线整合与自审修复），本节最终文档提交SHA见Git记录。行情/缓存/规范输入/报告/HTML/本机配置/进度/截图均在忽略路径、不提交。无部署、账户连接、模拟盘或实盘。
+
+本轮所有可完成工作结束，无实现或资源阻塞。真实数据两处缺口使固定规则只选得3窗，不能补齐第四窗；未扩大Funding范围或容差。原始对象均复用有效缓存，**没有声称本轮实测了远端缺对象下载**，网络异常/残片/损坏/滴流由固定传输fixtures验证。CHECKSUM/URL与SHA不是独立签名或预存时间证明，完整性检查不替代财务核账，历史研究也不是盈利证明。浏览器/机械审查限制见上文。仅本地提交、未推送，因此**没有本轮新提交的远端CI**；用户提供的基线324acadd CI成功不能代替新代码CI。停止开发，等待用户验收。
 
 ## HTML哈希清单完整性补修（基线7355eb2）
 
