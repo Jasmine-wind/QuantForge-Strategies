@@ -1,6 +1,7 @@
 """Hash manifests must cover the fixed report structure before HTML publication."""
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -118,6 +119,22 @@ def test_study_diagnostics_stay_bound_to_every_window(browse_study_report, tmp_p
             assert (d['window'], d['member'], d['scenario']) == (w['label'], member['member'], member['scenario'])
             assert d['summary'] == member['summary']
             assert d['raw_report'].startswith('windows/' + w['label'] + '/')
+    assert before == {str(p.relative_to(root)): sha256(p) for p in root.rglob('*') if p.is_file()}
+    # Reuse this genuine, already produced study; exposure must not rerun it.
+    output = tmp_path / 'exposure'
+    proc = subprocess.run([sys.executable, str(Path(__file__).parents[1] / 'tools/exposure_review.py'),
+                           '--source', 'synthetic', str(root), str(diagnostic), '--output', str(output)],
+                          text=True, capture_output=True)
+    assert proc.returncode == 0, proc.stderr
+    records = json.loads((output / 'exposure.json').read_text())['records']
+    assert len(records) == 24
+    assert [r['window'] for r in records] == ['window-01'] * 12 + ['window-02'] * 12
+    for r in records:
+        assert r['window_minutes'] == {'window-01': 262080, 'window-02': 264960}[r['window']]
+        if r['member'] == 'btcusdt_perpetual_long_hold':
+            assert r['long_minutes'] == r['window_minutes'] and r['end_of_test_count'] == 1
+        else:
+            assert r['flat_minutes'] == r['window_minutes'] and r['participation_rate'] == 0
     assert before == {str(p.relative_to(root)): sha256(p) for p in root.rglob('*') if p.is_file()}
 
 

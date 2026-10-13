@@ -54,4 +54,6 @@ jobs:
             "$GITHUB_WORKSPACE/tests/test_prepare.py" \
             "$GITHUB_WORKSPACE/tests/test_download_transport.py" \
             "$GITHUB_WORKSPACE/tests/test_browse_diagnostics.py" \
-            "$GITHUB_WORKSPACE/tests/test_compare.py"
+            "$GITHUB_WORKSPACE/tests/test_compare.py" \
+            "$GITHUB_WORKSPACE/tests/test_audit_optimization.py" \
+            "$GITHUB_WORKSPACE/tests/test_exposure_review.py"

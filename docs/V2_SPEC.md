@@ -215,12 +215,12 @@
 
 ### 10.4 固定三文件输出契约
 
-输出必须是不存在的新目录，位于所有原报告/诊断目录之外。私有同级staging全部成功后发布；错误或中断清理自己的staging，拒绝覆盖，包括最终发布前新出现的目标。读取前后及发布前检查来源完整SHA快照，检测变化则失败，不发布成功子集。固定输入、参数、代码及依赖环境重复生成三个文件相同字节；不写生成时间、随机staging名或目标输出路径。
+输出必须是不存在的新目录，位于所有原报告/诊断目录之外。私有同级staging全部成功后发布；错误或中断清理自己的staging，拒绝覆盖，包括最终发布前新出现的目标。读取前后及发布前检查来源完整SHA快照；时间计算只解析与已验证来源SHA相符的同一CSV字节快照，检测变化则失败，不发布成功子集。固定输入、参数、代码及依赖环境重复生成三个文件相同字节；不写生成时间、随机staging名或目标输出路径。
 
 1. **exposure.json**：`exposure_version=qfs-exposure-review-1`、completed状态、固定definitions/limitations、研究代码/脚本SHA及runtime；有序sources记录标签、实际报告/诊断路径、两棵完整来源文件SHA清单、原窗口配置/数据来源/数据SHA/代码身份和诊断代码；records为下述全部CSV字段加原已验证的完整 `diagnostic_record`，不丢弃已有集中度逐笔/终点明细。另记录窗口overlaps，以及exposure.csv/report.md的SHA。原行情SHA仅是原报告记录的来源，本工具不假冒重新验证行情或核账。
 2. **exposure.csv**：每窗口每成员每场景一行，固定顺序字段为：
    `source, window, scenario, member, start, end, raw_report, window_minutes, long_minutes, short_minutes, flat_minutes, holding_minutes, long_fraction, short_fraction, flat_fraction, participation_rate, long_trade_count, short_trade_count, long_average_holding_hours, short_average_holding_hours, end_of_test_count, initial_equity, total_return, maximum_drawdown, trade_count, net_pnl, long_net_pnl, short_net_pnl, fees, slippage_cost, funding_net, top5_net_pnl, top5_positive_profit_share, top5_total_net_share, max_consecutive_losses, return_minus_cash_pp, return_minus_perpetual_pp, cost_return_change_pp`。
-   后17项金融/诊断字段从原summary/诊断复制，不另算财务指标；成本变化是既有 `cost_change_from_base.return_pp`。fraction/return/drawdown为0～1口径（return可超范围），百分点字段不再乘100；CSV浮点17位有效数字、LF，null为空，JSON仍为null，Markdown为n/a。
+   后17项金融/诊断字段从原summary/诊断复制，不另算财务指标；成本变化是既有 `cost_change_from_base.return_pp`。fraction/return/drawdown等保存小数比率而非百分数（仅时间fraction限定[0,1]，收益及前5总净盈亏占比不作此限制），百分点字段不再乘100；CSV浮点17位有效数字、LF，null为空，JSON仍为null，Markdown为n/a。
 3. **report.md**：中文、每窗独立，固定展示全部三场景/四成员的时间暴露表、收益/回撤/方向净盈亏/集中度/同窗同场景基准差表及费用/滑点/Funding/相对base成本变化表。另逐策略给出base暴露与方向/集中度事实、三场景实际收益，不排名筛窗。只用事先固定的描述：Flat>50%称“超过一半时间空仓”；base正收益（或正基准收益差）在较高成本场景变为≤0时说明“由正变为非正”。这是观察而非成本/暴露的因果识别；前5按原定义，不足5笔全列，净收益非正时净盈亏集中度为n/a，不改变分母。
 
 ### 10.5 验收与禁止变更
