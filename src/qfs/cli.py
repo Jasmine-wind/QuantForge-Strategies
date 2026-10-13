@@ -13,6 +13,7 @@ from .engine import run_backtest
 from .report import write_reports
 from .prepare import prepare
 from .study import StudyConfig, run_study
+from .scan import scan
 
 
 def main(argv=None):
@@ -29,6 +30,9 @@ def main(argv=None):
         acquisition.add_argument('--' + name, required=True)
     acquisition.add_argument('--reuse', action='append', default=[], help='Read-only raw root (repeatable)')
     acquisition.add_argument('--offline', action='store_true', help='Record missing objects without network access')
+    scanner = sub.add_parser('scan', help='Inspect all 29 fixed research months offline, then preselect six-month windows')
+    scanner.add_argument('--manifest', required=True)
+    scanner.add_argument('--output', required=True)
     preparation = sub.add_parser('prepare', help='Prepare checked official monthly archives offline')
     for name in ('manifest', 'start', 'end', 'output'):
         preparation.add_argument('--' + name, required=True)
@@ -46,6 +50,10 @@ def main(argv=None):
             return 0
         if args.command == 'browse':
             print(export_html(args.run, args.output))
+            return 0
+        if args.command == 'scan':
+            result = scan(args.manifest, args.output)
+            print(f"{Path(args.output).resolve()} ({len(result['windows'])} windows; {len(result['months'])} months inspected)")
             return 0
         if args.command == 'prepare':
             prepare(args.manifest, args.output, args.start, args.end)

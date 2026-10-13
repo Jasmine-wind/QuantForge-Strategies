@@ -157,6 +157,58 @@ manifest为JSON：`{"symbol":"BTCUSDT","archives":[...]}`。每项仅有 `kind`�
 
 自动请求600小时预热及范围内必要Funding/Mark结束边界，ZIP/CHECKSUM/SHA/CRC验证后才发布缓存。合法缓存只读复用；损坏缓存拒绝、不覆盖；缺对象才访问官方HTTPS，连接/每次读取30秒、总传输约120秒上限、最多两次完整下载，不续传。失败仍保存对象记录并返回非零；manifest只含实际取得对象，不能视作连续覆盖。CHECKSUM及URL是来源记录/完整性核验，不等于独立签名认证。支持范围仍为Funding `[2020-01-01,2026-08-01)`；旧已见历史属性不因独立准备而改变。真实对照及目录见DATA_AUDIT/VALIDATION。
 
+## 独立质量选择与study（固定补充历史范围）
+
+```bash
+.venv/bin/qfs scan --manifest .local/acquisition/manifest.json --output .local/selection.json
+sha256sum .local/selection.json
+```
+
+scan固定检查`[2024-03-01,2026-08-01)`全部29个月，包括缺失尾部；即使已有4窗也不早停。原canonical选择命令的早停行为不变。质量合格须通过prepare/严格loader的分钟连续、150根4H预热、Funding实际毫秒及Mark边界验证。按最早连续6月、最多4窗非重叠选择，缺口断块，少于2窗不能声称多窗口验证。`scan_scope`为研究请求；`actual_source_coverage`为实际对象首末/行数而非连续性承诺，缺对象留在逐月errors中。
+
+选择JSON/SHA保存后、策略运行前，按**完整windows列表**准备输入。以下可复现脚本仅使用本仓库与显式manifest（不要求旧canonical）：
+
+```python
+import json
+from pathlib import Path
+from qfs.acquire import required_objects
+from qfs.data import sha256
+from qfs.prepare import prepare
+from qfs.report import write_json
+
+selection = Path('.local/selection.json').resolve()
+proof = json.loads(selection.read_text())
+print('Preselected evidence SHA:', sha256(selection))  # 保存此值后再运行任何策略
+assert proof['windows'], 'No six-month window; keep missing-data evidence'
+plans = Path('.local/window-manifests').resolve()
+plans.mkdir(parents=True, exist_ok=False)
+config = dict(symbol='BTCUSDT', initial_equity=10000, position_fraction=.5,
+              maximum_leverage=1, taker_fee_rate=.0005, slippage_rate=.0005,
+              output_dir=str(Path('runs').resolve()),
+              selection_evidence=dict(path=str(selection), sha256=sha256(selection)), windows=[])
+for window in proof['windows']:
+    urls = {o['official_url'] for o in required_objects(window['start'], window['end'])}
+    entries = [{k: o[k] for k in ('kind', 'path', 'checksum', 'official_url', 'sha256')}
+               for o in proof['source_files'] if o['official_url'] in urls]
+    manifest = plans / (window['label'] + '.json')
+    write_json(manifest, dict(symbol='BTCUSDT', archives=entries))
+    output = Path('data') / ('independent-' + window['label'])
+    source = prepare(manifest, output, window['start'], window['end'])
+    config['windows'].append({k: window[k] for k in ('label', 'start', 'end')} | dict(
+        data={k: str((output / v['path']).resolve()) for k, v in source['normalized_files'].items()},
+        data_source=source))
+with Path('.local/independent-study.json').open('x') as f:
+    json.dump(config, f, indent=2)
+```
+
+```bash
+.venv/bin/qfs study --config .local/independent-study.json
+.venv/bin/python tools/verify_study.py --config .local/independent-study.json --output .local/independent-verification.json
+# --config核账入口完整执行两次并比较；--run <已完成study>只核账，不声称重复性
+```
+
+官方身份记录市场/转换契约、已核验URL/ZIP SHA/CHECKSUM SHA；不会硬填canonical dataset_identity。窗口规范文件摘要和所需原对象必须与选择证据关联。独立核账自行验证全29月完整性和来源关联，不调用生产选择器。SHA不是来源签名或预存时间的独立证明。各窗独立初始账户，不拼接或合并年化；固定成员、成本场景与策略参数不变。
+
 ## 从旧 QuantForge 只读转换
 
 检查结果及核验哈希见 [docs/DATA_AUDIT.md](docs/DATA_AUDIT.md)。旧 schema-7 CSV、归档 ZIP、Parquet analytics mirror 都只读检查；不复用旧研究架构或合成执行器。实际使用 canonical CSV，而不是非正式 analytics mirror；逐文件 SHA-256、manifest 身份及官方 Mark ZIP 的本地 CHECKSUM 均核验。

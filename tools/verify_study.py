@@ -1,5 +1,6 @@
 """Independent study audit; reuse the report ledger verifier, never the engine."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -13,13 +14,54 @@ from ledger import close
 from verify_comparison import verify as verify_comparison
 
 
+def official_identity(sources):
+    # Independently serialize the documented identity; no production source helper.
+    objects = sorted([{k: o[k] for k in ('kind', 'official_url', 'sha256', 'checksum_sha256')} for o in sources],
+                     key=lambda o: (o['kind'], o['official_url']))
+    assert len({o['official_url'] for o in objects}) == len(objects)
+    for obj in objects:
+        for key in ('sha256', 'checksum_sha256'):
+            assert len(obj[key]) == 64 and all(c in '0123456789abcdef' for c in obj[key])
+    identity = {'type': 'official-monthly-v1', 'market': 'Binance BTCUSDT USD-M perpetual',
+                'conversion': 'complete 240-minute UTC OHLC; exact Decimal volume sum then float64; native integer-ms Funding; actual-minute Mark Open; no interpolation',
+                'objects': objects}
+    return identity | {'sha256': hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(',', ':')).encode()).hexdigest()}
+
+
+def verify_official_link(config, proof):
+    source = config['data_source']
+    assert 'dataset_identity_sha256' not in source and source['independent_out_of_sample'] is False
+    identity = official_identity(source['source_files'])
+    assert identity == source['source_identity'] and source['conversion'] == identity['conversion']
+    inventory = {o['official_url']: o for o in official_identity(proof['source_files'])['objects']}
+    start, end = pd.Timestamp(config['start']), pd.Timestamp(config['end'])
+    required = set()
+    for kind, category, stem in [('trade_1m', 'klines', '1m'), ('mark_1m', 'markPriceKlines', '1m'), ('funding', 'fundingRate', 'fundingRate')]:
+        lower = start - pd.Timedelta(hours=600) if kind == 'trade_1m' else start
+        upper = end if kind == 'trade_1m' or end == VERIFIED_END else end + pd.Timedelta(minutes=1)
+        for month in pd.date_range(lower.normalize().replace(day=1), upper, freq='MS', inclusive='left'):
+            prefix = f'https://data.binance.vision/data/futures/um/monthly/{category}/BTCUSDT/'
+            required.add(prefix + ('' if kind == 'funding' else '1m/') + f'BTCUSDT-{stem}-{month:%Y-%m}.zip')
+    assert {o['official_url'] for o in identity['objects']} == required, 'official required warmup/boundary objects disagree'
+    assert all(inventory.get(o['official_url']) == o for o in identity['objects']), 'official source association disagrees'
+    assert source['run_coverage'] == {'start': start.isoformat(), 'end': end.isoformat()}
+    for key, path in config['data'].items():
+        assert sha256(path) == source['normalized_files'][key]['sha256'], 'official normalized hash mismatch'
+
+
 def selected_from_months(proof):
     # Independent fixed-rule replay; do not import the production selector/study.
     assert proof['mode'] == 'study' and proof['strategy_results_used'] is False
     assert proof['independent_out_of_sample'] is False
     assert proof['policy'] == {'window_months': 6, 'maximum_windows': 4,
            'selection': 'earliest consecutive qualified UTC months, nonoverlapping; gaps reset candidates'}
-    coverage = proof['source_coverage']
+    official = 'source_identity' in proof
+    coverage = proof['scan_scope' if official else 'source_coverage']
+    if official:
+        assert proof['scan_version'] == 'qfs-official-full-scan-1'
+        assert coverage == {'start_utc_inclusive': '2024-03-01T00:00:00+00:00', 'end_utc_exclusive': '2026-08-01T00:00:00+00:00'}
+        assert 'dataset_identity_sha256' not in proof
+        assert official_identity(proof['source_files']) == proof['source_identity']
     lower = max(pd.Timestamp(coverage['start_utc_inclusive']).tz_convert('UTC'), VERIFIED_START)
     upper = min(pd.Timestamp(coverage['end_utc_exclusive']).tz_convert('UTC'), VERIFIED_END)
     # Enumerate full calendar months independently, not via StudyConfig/selector.
@@ -50,7 +92,7 @@ def selected_from_months(proof):
             block = []
             if len(windows) == 4:
                 break
-    if len(windows) < 4:
+    if official or len(windows) < 4:
         assert len(inspected) == len(required), (
             f'incomplete complete-month scan; expected through '
             f'{(required[-1] + pd.DateOffset(months=1)).isoformat()}')
@@ -92,7 +134,10 @@ def verify(output):
             assert shared[key] == config[key]
         for key in ('start', 'end', 'data', 'data_source'):
             assert shared[key] == item[key]
-        assert shared['data_source']['dataset_identity_sha256'] == proof['dataset_identity_sha256']
+        if 'source_identity' in proof:
+            verify_official_link(shared, proof)
+        else:
+            assert shared['data_source']['dataset_identity_sha256'] == proof['dataset_identity_sha256']
         lookup = {(m['scenario'], m['member']): m['summary'] for m in comparison['members']}
         rows = [r for r in payload['rows'] if r['window'] == window['label']]
         assert len(rows) == 12

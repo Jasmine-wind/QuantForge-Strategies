@@ -8,6 +8,10 @@
 
 官方README通过curl有限超时取得（web工具因本机fake-IP保护拒绝，未无限重试），确认USD-M毫秒Kline字段及相邻.CHECKSUM约定；原Funding/Mark格式沿用已核验原始存档。本机证据 `.local/independent/binance-public-data-README.md`。实际acquire固定范围请求88对象（29月×3＋合约2024-02预热），88均复用已核验原始ZIP，无缺失/无新下载；记录 `.local/independent/acquisition/`，不意味着分钟连续，待完整质量扫描。新工作尚未推送，基线CI不是新提交CI。
 
+阶段二实现：scan固定29个月，复用prepare和原loader；新增路径无关official身份、窗口对象/规范文件关联校验，旧canonical分支原样保留。独立verify_study自行计算身份/所需对象和完整月范围，不使用生产选择器。14项新增测试覆盖完整缺尾扫描、原生47ms结束边界、空源/缺Mark边界、身份/规范文件/转换/范围错配，以及找到4窗仍拒绝截尾；连同prepare/旧选择/配置定向共71通过（2个长时study集成留最终全套）。
+
+首次真实扫描29个月完整保存于 `.local/independent/selection.json`，SHA `91d0b50af74bc3f0a28ce5109908a3bec51d8aed261809e5c2b6c75de6185d65`。2024-08 Mark在08-12 10:02缺口，2026-06 Funding Mark在06-29 00:00缺失。最早三窗为2024-09～2025-03、2025-03～2025-09、2025-09～2026-03；2024-03～07仅5月被缺口打断，尾部不足6月，不缩短凑第四窗。尚待本阶段真实准备/完整重复study核账，所有历史仍探索性。
+
 ## HTML哈希清单完整性补修（基线7355eb2）
 
 本轮仅补修browse完整性校验，基线 `7355eb25b2a438af779d5bd19c5f6ac049b5e4a3` 已由用户授权推送。初始main及旧QuantForge工作区干净；无新功能/依赖/数据准备或策略重跑，保留全部269测试、V1/Funding/财务口径和compare/study原52/211产物。新修复仅本地提交，不自动推送。

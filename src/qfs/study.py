@@ -13,6 +13,7 @@ from .config import Config, utc
 from .data import load_data, sha256
 from .funding import VERIFIED_START, VERIFIED_END
 from .report import LIMITATIONS, code_identity, write_json
+from .official import SCAN_SCOPE, check_source_link, source_identity
 
 
 STUDY_VERSION = "qfs-study-v2-stage2.0"
@@ -76,8 +77,13 @@ class StudyConfig:
                 or evidence.get('strategy_results_used') is not False or evidence.get('independent_out_of_sample') is not False):
             raise ValueError('study: require fixed data-only study policy and explicit seen-data boundary')
         rows = evidence.get('months', [])
-        coverage = evidence.get('source_coverage', {})
+        official = 'source_identity' in evidence
+        coverage = evidence.get('scan_scope' if official else 'source_coverage', {})
         try:
+            if official and (evidence.get('scan_version') != 'qfs-official-full-scan-1' or coverage != SCAN_SCOPE
+                             or evidence['source_identity'] != source_identity(evidence['source_files'])
+                             or 'dataset_identity_sha256' in evidence):
+                raise ValueError('study: official full scan scope / identity disagrees')
             first = max(utc(coverage['start_utc_inclusive']), VERIFIED_START)
             first_month = first.normalize().replace(day=1)
             if first_month < first:
@@ -94,7 +100,7 @@ class StudyConfig:
             if previous > last_month_end:
                 raise ValueError('study: evidence exceeds audited complete-month coverage')
             expected = choose_study_windows(rows)
-            if len(expected) < 4 and previous != last_month_end:
+            if (official or len(expected) < 4) and previous != last_month_end:
                 raise ValueError(f'study: incomplete complete-month scan; expected through '
                                  f'{last_month_end.isoformat()}, inspected through {previous.isoformat()}')
         except (KeyError, TypeError) as exc:
@@ -121,7 +127,9 @@ class StudyConfig:
             if last_end is not None and config.start < last_end:
                 raise ValueError(f'study {label}: windows overlap or are out of order')
             last_end = config.end
-            if (not evidence.get('dataset_identity_sha256') or
+            if official:
+                check_source_link(config.data_source, evidence, config)
+            elif (not evidence.get('dataset_identity_sha256') or
                     config.data_source.get('dataset_identity_sha256') != evidence['dataset_identity_sha256'] or
                     config.data_source.get('independent_out_of_sample') is not False):
                 raise ValueError(f'study {label}: source identity / seen-data declaration disagrees with selection evidence')

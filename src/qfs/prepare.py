@@ -14,6 +14,7 @@ from .config import Config, utc
 from .data import load_data, require_grid, sha256, validate_frame
 from .funding import MAX_DELAY, VERIFIED_END, VERIFIED_START, funding_policy, validate_funding_schedule
 from .report import write_json
+from .official import CONVERSION, source_identity
 
 
 KINDS = {'trade_1m': 'klines', 'mark_1m': 'markPriceKlines', 'funding': 'fundingRate'}
@@ -145,7 +146,7 @@ def prepare(manifest, output, start, end):
     source = {'description': 'Verified local official Binance monthly archives; independent of QuantForge canonical',
               'official_source': 'https://data.binance.vision/', 'independent_out_of_sample': False,
               'manifest_path': str(manifest), 'manifest_sha256': before, 'source_files': sources,
-              'conversion': 'complete 240-minute UTC OHLC; exact Decimal volume sum then float64; native integer-ms Funding; actual-minute Mark Open; no interpolation',
+              'conversion': CONVERSION, 'source_identity': source_identity(sources),
               'funding_validation': funding_policy(), 'warmup_start': warm.isoformat(),
               'run_coverage': {'start': start.isoformat(), 'end': end.isoformat()}}
     output.parent.mkdir(parents=True, exist_ok=True)
