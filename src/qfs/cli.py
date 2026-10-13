@@ -14,6 +14,7 @@ from .report import write_reports
 from .prepare import prepare
 from .study import StudyConfig, run_study
 from .scan import scan
+from .diagnose import diagnose
 
 
 def main(argv=None):
@@ -36,6 +37,9 @@ def main(argv=None):
     preparation = sub.add_parser('prepare', help='Prepare checked official monthly archives offline')
     for name in ('manifest', 'start', 'end', 'output'):
         preparation.add_argument('--' + name, required=True)
+    diagnosis = sub.add_parser('diagnose', help='Attribute completed report trades and risk without rerunning strategies')
+    diagnosis.add_argument('--run', required=True)
+    diagnosis.add_argument('--output', required=True)
     browser = sub.add_parser('browse', help='Export standalone offline HTML from existing reports')
     browser.add_argument('--run', required=True)
     browser.add_argument('--output', required=True)
@@ -47,6 +51,9 @@ def main(argv=None):
             if record['failed_objects']:
                 print(f"qfs: {len(record['failed_objects'])} objects unavailable; see acquisition.json", file=sys.stderr)
                 return 1
+            return 0
+        if args.command == 'diagnose':
+            print(diagnose(args.run, args.output))
             return 0
         if args.command == 'browse':
             print(export_html(args.run, args.output))
