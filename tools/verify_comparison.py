@@ -117,7 +117,7 @@ def main():
     runs = [Path(args.run)] if args.run else []
     if args.config:
         for _ in range(2):
-            proc = subprocess.run(['.venv/bin/qfs', 'compare', '--config', args.config], capture_output=True, text=True)
+            proc = subprocess.run([sys.executable, '-m', 'qfs.cli', 'compare', '--config', args.config], capture_output=True, text=True)
             assert proc.returncode == 0, proc.stderr
             runs.append(Path(proc.stdout.strip()))
             print('compare =>', runs[-1])

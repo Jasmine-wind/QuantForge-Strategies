@@ -114,3 +114,23 @@ def test_representable_annualized_still_compares_the_numeric_value(dataset, tmp_
     assert rejected.returncode != 0
     assert "AssertionError: (123.0, 0.0)" in rejected.stderr
     assert not audit.exists()
+
+
+def test_config_mode_uses_invoking_interpreter_outside_checkout(dataset, tmp_path):
+    import platform
+    config, _, _ = dataset()
+    raw = config.as_dict()
+    del raw['strategy']
+    path = tmp_path / 'compare.json'
+    path.write_text(json.dumps(raw))
+    audit = tmp_path / 'audit.json'
+    # No .venv/bin/qfs exists in this working directory.
+    proc = subprocess.run([sys.executable, str(VERIFIER), '--config', str(path), '--output', str(audit)],
+                          cwd=tmp_path, text=True, capture_output=True)
+    assert proc.returncode == 0, proc.stderr
+    evidence = json.loads(audit.read_text())
+    assert evidence['repeatability'] == '52/52 files identical'
+    assert len(evidence['runs']) == 2
+    for run in evidence['runs']:
+        payload = json.loads((Path(run) / 'comparison.json').read_text())
+        assert payload['runtime']['python'] == platform.python_version()
