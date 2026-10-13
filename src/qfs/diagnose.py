@@ -146,7 +146,7 @@ def markdown(records, run):
         net, delta = r['overall']['net_pnl'], r['return_minus_perpetual_pp']
         lines.append(f"- {r['window']} / {r['scenario']} / {r['member']}：{'净盈利' if net > 0 else '净亏损' if net < 0 else '净持平'} {n(net)} USDT；"
                      f"相对永续{'落后' if delta < 0 else '领先' if delta > 0 else '持平'} {n(abs(delta))}百分点。"
-                     f"前5笔占全部正利润 {n(r['top5_positive_profit_share'], True)}%；终点强平 {len(r['terminal_trades'])}笔。")
+                     f"前5笔占全部正利润 {n(r['top5_positive_profit_share'], True)}%；终点强制平仓 {len(r['terminal_trades'])}笔。")
     lines += ['', '## 后续问题与证据边界', '',
               '对照各窗方向贡献、连亏与前5利润占比，检查趋势参与不足、逆势方向亏损、少数大交易依赖和成本敏感性；这些是后续研究问题，不是已经确认的因果解释。',
               '若相对永续差距持续为负，只能说明这些固定窗口/假设下落后该基准；不能据此证明未来盈利/亏损或交易可执行性。',

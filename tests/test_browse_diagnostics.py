@@ -21,6 +21,10 @@ def test_browse_optional_diagnostics_cli_matches_every_switch(dataset, tmp_path)
     html = tmp_path / 'with-diagnostics.html'
     assert main(['browse', '--run', str(run), '--output', str(html), '--diagnostics', str(output)]) == 0
     view = embedded(html)
+    page = html.read_text()
+    assert 'end_of_test · 终点强制平仓' in page and '终点强平' not in page
+    assert '终点强制平仓是窗口处理规则' in page
+    assert 'complete margin/liquidation model' in page
     records = json.loads((output / 'diagnostics.json').read_text())['records']
     assert [m['diagnostics'] for m in view['windows'][0]['members']] == records
     for member in view['windows'][0]['members']:

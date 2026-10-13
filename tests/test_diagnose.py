@@ -85,6 +85,8 @@ def test_diagnose_cli_all_groups_cost_results_and_repeatability(dataset, tmp_pat
     diagnose(run, repeat)
     assert {p.name: sha256(p) for p in first.iterdir()} == {p.name: sha256(p) for p in repeat.iterdir()}
     payload = load_diagnostics(first, load_view(run))
+    markdown = (first / 'report.md').read_text()
+    assert '终点强制平仓' in markdown and '终点强平' not in markdown
     records = payload['records']
     assert len(records) == 12
     assert len(pd.read_csv(first / 'diagnostics.csv')) == 12

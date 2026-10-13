@@ -1,5 +1,4 @@
 """Local transport fixtures only: no CI network or real market data."""
-import io
 import json
 from pathlib import Path
 import zipfile
@@ -89,52 +88,32 @@ def test_download_publication_and_failure_cleanup(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('status,headers,body', [(206, {}, b'x'), (200, {'Content-Range': 'bytes 0-1/3'}, b'x'), (200, {'Content-Length': '3'}, b'x')])
 def test_partial_responses_never_accepted(tmp_path, monkeypatch, status, headers, body):
-    calls = []
-    class Opener:
-        def open(self, req, timeout):
-            calls.append(timeout)
-            stream = io.BytesIO(body)
-            stream.status, stream.headers = status, headers
-            return stream
-    monkeypatch.setattr(module.urllib.request, 'build_opener', lambda *args: Opener())
+    from test_download_transport import local_http
+    monkeypatch.setenv('NO_PROXY', '127.0.0.1')
     target = tmp_path / 'partial'
-    with pytest.raises(ValueError):
-        module.download(module.ORIGIN + 'test', target, timeout=1)
-    assert calls == [1, 1] and not target.exists()
+    with local_http([{'status': status, 'headers': headers, 'body': body}]) as (url, requests):
+        with pytest.raises(ValueError):
+            module.download(url, target, timeout=1)
+        assert len(requests) == 2 and not target.exists()
 
 
 def test_timeouts_bounded_and_successful_http_body(tmp_path, monkeypatch):
-    calls = []
-    class Opener:
-        def open(self, req, timeout):
-            calls.append(timeout)
-            if len(calls) == 1:
-                raise TimeoutError('connect fixture')
-            stream = io.BytesIO(b'complete')
-            stream.status, stream.headers = 200, {'Content-Length': '8'}
-            return stream
-    monkeypatch.setattr(module.urllib.request, 'build_opener', lambda *args: Opener())
+    from test_download_transport import local_http
+    monkeypatch.setenv('NO_PROXY', '127.0.0.1')
     target = tmp_path / 'download'
-    module.download(module.ORIGIN + 'test', target, timeout=1)
-    assert calls == [1, 1] and target.read_bytes() == b'complete'
+    with local_http([{'first_byte_delay': .4}, {'body': b'complete'}]) as (url, requests):
+        module.download(url, target, timeout=.2)
+        assert len(requests) == 2 and target.read_bytes() == b'complete'
+        assert requests[0]['disconnected'].wait(.5)
 
 
 def test_trickling_response_hits_total_deadline_without_full_chunk(tmp_path, monkeypatch):
-    class Trickling(io.BytesIO):
-        def read(self, *args):
-            pytest.fail('full chunk read can block indefinitely on a trickling peer')
-        def read1(self, *args):
-            return b'x'
-    class Opener:
-        def open(self, req, timeout):
-            stream = Trickling()
-            stream.status, stream.headers = 200, {}
-            return stream
-    monkeypatch.setattr(module.urllib.request, 'build_opener', lambda *args: Opener())
-    ticks = iter([0, 5, 6, 11])
-    monkeypatch.setattr(module.time, 'monotonic', lambda: next(ticks))
-    with pytest.raises(ValueError, match='deadline'):
-        module.download(module.ORIGIN + 'fixture', tmp_path / 'download', timeout=1)
+    from test_download_transport import local_http
+    monkeypatch.setenv('NO_PROXY', '127.0.0.1')
+    with local_http([{'body': b'x' * 500, 'body_delay': .005}]) as (url, requests):
+        with pytest.raises(ValueError, match='deadline'):
+            module.download(url, tmp_path / 'download', timeout=.2, attempts=1)
+        assert requests[0]['disconnected'].wait(.5)
     assert not (tmp_path / 'download').exists()
 
 

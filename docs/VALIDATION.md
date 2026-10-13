@@ -1,5 +1,29 @@
 # V1 / V2 验收记录
 
+## 下载整体期限与终点强制平仓文案补修（基线d4136d7）
+
+本轮仅修这两项；初始HEAD为`d4136d758bbd9665b9f1f756e35662cdbcd06d79`且工作区干净。该基线已推送，CI [38341960958](https://github.com/Jasmine-wind/QuantForge-Strategies/actions/runs/38341960958) 已成功；本轮GitHub CLI复核headSha=d4136d7、completed/success（`.local/deadline-fix/baseline-ci.json`）。新补修只本地提交，不自动推送，不能将基线CI计作新提交CI。
+
+先写真实回归：`pytest -q tests/test_download_transport.py`在原代码上失败（1 failed，2.25秒）：socket timeout=0.2、总预算0.8秒，本地HTTP逐字节发送响应头超过2秒后仍成功，未抛期限错误。根因确为opener.open读取完响应头才开始计总预算；每次socket读取在滴流中持续有进展，不能代替整体期限。已有read1仅避免响应体整块等待，不覆盖响应头。证据`.local/deadline-fix/red-headers.log`。
+
+现在每次尝试由小型标准库独立子进程执行原urllib GET，父进程在启动前取monotonic总期限；创建进程耗时计入剩余预算，连接/DNS/TLS/响应头/响应体在同一预算内。到期kill并communicate回收，确认传输进程退出后才删除残片/重试；异常中断也走相同取消清理，不留下继续下载的线程或请求。工作进程仅加载标准库，不导入回测/Pandas。默认socket 30秒、总预算120秒、至多两次；保留200/Content-Range/Content-Length检查、官方重定向限制及永久HTTP错误不重试。没有新的下载框架/依赖/CLI功能。
+
+原374个测试用例保留；原5项绑定内存Opener/模拟时钟的传输用例保持测试身份与原拒绝/重试断言，改为本地真实HTTP传输，以跨进程边界仍验证行为。新增回归除检查返回耗时，还要求fixture在关闭服务器之前观察到客户端断连，防止只让等待方超时；涵盖慢响应头、滴流体、头体共享预算、正常请求、永久404、两次到期、到期后成功重试/残片不拼接、acquire取得CHECKSUM后ZIP失败的记录与暂存清理。
+
+文案先在原公开diagnose/browse CLI测试增加断言，原代码2项失败（`.local/deadline-fix/red-wording.log`），再将Markdown、HTML动态退出标签/说明和既有相关文档统一为“终点强制平仓”。明确这是窗口处理规则，不是策略信号，不模拟交易所强平。保留end_of_test、terminal_close与所有数值/来源/绑定字段；没有实现交易所强平模型。
+
+### 补修验证与边界
+
+- 锁定`uv sync --locked --extra test`通过；全套 **385 passed / 0 failed / 0 skipped**（374既有＋11新增），685.74秒。`compileall src tools tests`、全部qfs子命令help、`git diff --check`通过；依赖和锁文件不变。日志`.local/deadline-fix/full-tests.log`。全套通过后未重复运行。
+- 离线wheel构建并实际安装到`.local/deadline-fix/wheel-installed/`，断言qfs从安装目录导入，确认独立工作进程脚本和HTML均入包；在该wheel代码上执行49项定向测试全部通过，包括真实慢头/滴流/正常HTTP、acquire失败清理、diagnose/browse CLI与完整绑定检查。沿用锁定依赖，不是editable源码冒充wheel。证据`wheel-identity.json`、`wheel-tests.log`等；wheel SHA `d943c89b496600a45fc8148a867a88bbaed6e7e13df5059af1bad3ddc821a3a6`。
+- 只读复核原新三窗/旧四窗/2月/年度等12棵报告及重复树，全部SHA仍与原独立核账证据一致；旧/新选择记录未变，原诊断及HTML全树未改。新生成的四套诊断records与CSV和原件完全一致，Markdown严格只发生指定文字替换；用原诊断绑定导出的HTML也严格只有两处预期文案变化。输出和对照证据`.local/deadline-fix/real/`，不覆盖`.local/independent/delivery/`。
+- `verify_study --run`只读复核新三窗36组、旧四窗48组，逐笔、逐分钟、分期、年化null及来源/顶层核账全通过；`verify-{new,old}.json/log`明确本次不检查新的重复运行。首次将所有只读对照和核账合并执行时触发工具360秒上限，已完成前面的文案/哈希对照；后续使用充足命令预算完成两个核账，无假冒成功或重跑策略。
+- Chromium file://实测新三窗36个切换、27行终点交易标签及“终点强制平仓”说明一致，保留“不模拟交易所强平”；桌面1440×1000、小屏390×844无页面横向溢出，0外部resource、0控制台错误/警告。截图/日志在`.local/deadline-fix/`。仅文案变更，无布局/交互修改；机械UI检测仍因解析模块缺失降级，不声称完整计算对比度审查。
+
+自审确认总期限不是迟到检查：父进程等待超时即终止拥有全部socket的进程，并在其退出后清理/重试；测试要求服务器在fixture拆除之前实际观察断连，同时检查残片消失。单次预算不在读完响应头后重置；头体共享、第二次尝试重新给预算均有真实传输覆盖。原官方来源身份、完整29月扫描、固定成员/成本、账户/Funding、独立核账、诊断绑定、52/211产物及确定性口径没有变更。
+
+限制：操作系统调度、创建/回收进程有余量，不是硬实时系统；运行环境须允许启动同一Python解释器。本轮真实传输实测为本机HTTP，不依赖公网，也未声称重新实测远端HTTPS/TLS或其他OS；同一子进程生命周期覆盖这些阶段。所有生成证据Git忽略；旧仓库只读且HEAD仍d0e6a5d、工作区干净。没有行情/报告/HTML/本机配置进入提交，无扩展功能/部署/交易/推送；本地提交SHA见Git记录，尚无该补修远端CI。
+
 ## 独立官方研究四阶段（基线324acadd，本轮完成）
 
 初始HEAD为用户指定基线，工作区干净，旧仓库HEAD d0e6a5d/干净且只读。先在V2_SPEC第9节固定29个月完整扫描规则，再实现，无策略参数/账户/Funding变更、不自动推送。
@@ -12,11 +36,11 @@
 
 首次真实扫描29个月完整保存于 `.local/independent/selection.json`，SHA `91d0b50af74bc3f0a28ce5109908a3bec51d8aed261809e5c2b6c75de6185d65`。2024-08 Mark在08-12 10:02缺口，2026-06 Funding Mark在06-29 00:00缺失。最早三窗为2024-09～2025-03、2025-03～2025-09、2025-09～2026-03；2024-03～07仅5月被缺口打断，尾部不足6月，不缩短凑第四窗。在干净6f6516b代码上完成扫描重复字节相同、三窗准备各5/5文件重复相同、study完整运行两次各159文件全同，并逐笔/逐分钟/分期/年化null及顶层来源核账36组全通过。输入 `data/independent-window-{01,02,03}`及`-repeat`，配置/准备/核账证据 `.local/independent/`，真实报告 `runs/study-nk39lxqo`和`runs/study-cs9jwldu`；未覆盖原四窗及旧证据，所有历史仍探索性。
 
-阶段三：新增独立diagnose，复用browse全清单/哈希读取，直接读取交易（无账户重跑），三文件新目录原子发布。21项固定合成测试通过：方向可加总项/逐笔费用和净盈亏恒等、盈亏比/PF/null、实际顺序连亏及零打断、固定前5和平手、强平标记、完整成本变化、CLI和重复字节、来源错配/清单/CSV/方向篡改、文件系统失败清理。测试发现零值CSV列可读为NumPy int64导致JSON失败，已明确转原生float修复，不用宽泛字符串化掩盖类型。诊断绑定整个原报告树，并在加载时重新核对原交易分组；不是独立财务核账。
+阶段三：新增独立diagnose，复用browse全清单/哈希读取，直接读取交易（无账户重跑），三文件新目录原子发布。21项固定合成测试通过：方向可加总项/逐笔费用和净盈亏恒等、盈亏比/PF/null、实际顺序连亏及零打断、固定前5和平手、终点强制平仓标记、完整成本变化、CLI和重复字节、来源错配/清单/CSV/方向篡改、文件系统失败清理。测试发现零值CSV列可读为NumPy int64导致JSON失败，已明确转原生float修复，不用宽泛字符串化掩盖类型。诊断绑定整个原报告树，并在加载时重新核对原交易分组；不是独立财务核账。
 
 ### 阶段四、浏览实测与自审
 
-browse新增可选diagnostics，保持原命令及默认产物；校验诊断三文件、必需元数据/哈希、完整原报告树绑定及分组/CSV，失败无HTML。切换同窗/成员/成本同步显示方向贡献、三种完整成本重跑、前5正净盈利及终点强平。新三窗、旧四窗、2020-02、原366天四套原报告均完成诊断和HTML各自重复字节相同：`.local/independent/diagnostics-{new,old,feb,annual}`及`-repeat`、`html/{new,old,feb,annual}.html`及`-repeat.html`。原报告没有新增文件或改写；诊断阶段不重跑账户。
+browse新增可选diagnostics，保持原命令及默认产物；校验诊断三文件、必需元数据/哈希、完整原报告树绑定及分组/CSV，失败无HTML。切换同窗/成员/成本同步显示方向贡献、三种完整成本重跑、前5正净盈利及终点强制平仓。新三窗、旧四窗、2020-02、原366天四套原报告均完成诊断和HTML各自重复字节相同：`.local/independent/diagnostics-{new,old,feb,annual}`及`-repeat`、`html/{new,old,feb,annual}.html`及`-repeat.html`。原报告没有新增文件或改写；诊断阶段不重跑账户。
 
 Chromium直接file://实测桌面1440×1000、小屏390×844，四页108个全部切换逐项核对方向数值和前5/终点原交易，第二次限定确认核对1944个成本表数值和1512个原指标title全部相等；原生选择键盘及小屏表格方向键横向滚动通过。0外部resource，控制台0错误/警告。记录/截图/脚本在`.local/independent/`。使用桌面浏览器模拟小屏，未声称实体手机、多浏览器或OS覆盖。机械UI检测因缺HTML解析模块降级regex，不能称完整计算对比度/选择器审计通过；实际截图无页面横向溢出，宽表在可聚焦局部容器内滚动。
 

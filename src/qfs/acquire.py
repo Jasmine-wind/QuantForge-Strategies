@@ -1,25 +1,23 @@
 """Small official-only downloader. Backtests and preparation remain offline."""
-import http.client
 import json
+import math
 from pathlib import Path
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
-import urllib.error
-import urllib.request
 import zipfile
 
 import pandas as pd
 
+from ._download import ORIGIN
 from .config import utc
 from .data import sha256
 from .funding import VERIFIED_START, VERIFIED_END
 from .prepare import KINDS
 from .report import write_json
-
-ORIGIN = 'https://data.binance.vision/data/'
-
 
 def object_path(kind, month):
     category = KINDS[kind]
@@ -64,42 +62,46 @@ def checked_pair(path, obj):
             'official_url': obj['official_url'], 'sha256': fields[0]}
 
 
-class OfficialRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not newurl.startswith(ORIGIN):
-            raise ValueError('acquire: refusing non-official redirect')
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
 def download(url, target, timeout=30, attempts=2):
-    """Full GET only. Socket timeout bounds connect and each blocking read."""
-    opener = urllib.request.build_opener(OfficialRedirect())
+    """Full GET, with a cancellable per-attempt wall budget of 4 * timeout.
+
+    The budget starts before process creation, covering connection (including
+    DNS/TLS), response headers and body. Expiry kills and reaps the socket owner
+    before cleanup/retry; no background request or writer survives this call.
+    """
+    if not math.isfinite(timeout) or timeout <= 0 or type(attempts) is not int or not 1 <= attempts <= 2:
+        raise ValueError('acquire: require positive finite timeout and 1 or 2 attempts')
+    target = Path(target).resolve()
+    worker = Path(__file__).with_name('_download.py')
     for attempt in range(attempts):
+        deadline = time.monotonic() + timeout * 4
+        permanent = False
         try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'qfs-official-archives/1', 'Accept-Encoding': 'identity'})
-            with opener.open(req, timeout=timeout) as response:
-                if response.status != 200 or response.headers.get('Content-Range'):
-                    raise ValueError(f'acquire: require full HTTP 200 response for {url}')
-                size = 0
-                # Overall wall bound also prevents an indefinitely trickling response.
-                deadline = time.monotonic() + timeout * 4
-                with target.open('wb') as file:
-                    # read1 returns available bytes instead of waiting to fill a
-                    # megabyte; a trickling peer cannot bypass the wall deadline.
-                    while block := response.read1(1024 * 1024):
-                        size += len(block)
-                        file.write(block)
-                        if time.monotonic() > deadline:
-                            raise TimeoutError('acquire: total transfer deadline exceeded')
-                length = response.headers.get('Content-Length')
-                if length is not None and size != int(length):
-                    raise ValueError(f'acquire: incomplete Content-Length for {url}')
-            return
-        except (OSError, ValueError, http.client.HTTPException) as exc:
+            with subprocess.Popen([sys.executable, '-I', str(worker), url, str(target), str(timeout)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+                try:
+                    output, error = process.communicate(timeout=max(0, deadline - time.monotonic()))
+                    if time.monotonic() > deadline:
+                        raise subprocess.TimeoutExpired(process.args, timeout * 4)
+                finally:
+                    # Also cancel on interruption/errors, not just TimeoutExpired.
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate()  # reap before removing the worker's file
+            if process.returncode == 0:
+                return
+            reason = output.strip() or error.strip() or f'HTTP worker exited {process.returncode}'
+            permanent = process.returncode == 2
+        except subprocess.TimeoutExpired:
+            reason = 'TimeoutError: total request deadline exceeded (connection/headers/body)'
+        except OSError as exc:
+            reason = f'{type(exc).__name__}: {exc}'
+        except BaseException:
             target.unlink(missing_ok=True)
-            # Permanent missing/denied objects are not retried.
-            if attempt + 1 == attempts or isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
-                raise ValueError(f'acquire: {url}: {type(exc).__name__}: {exc}; attempt {attempt + 1}/{attempts}') from exc
+            raise
+        target.unlink(missing_ok=True)
+        if permanent or attempt + 1 == attempts:
+            raise ValueError(f'acquire: {url}: {reason}; attempt {attempt + 1}/{attempts}')
 
 
 def acquire(start, end, cache, output, reuse=(), offline=False):
