@@ -196,11 +196,19 @@ def load_view(run):
             'sampling': '每桶保留首尾、权益/全曲线峰值回撤各极值；只压缩显示，不重算财务指标', 'windows': windows}
 
 
-def export_html(run, output):
+def export_html(run, output, diagnostics=None):
     root, output = Path(run).resolve(), Path(output).resolve()
-    if output.exists() or output.is_relative_to(root):
-        raise ValueError('browse: output must be new and outside original report directory')
+    if output.exists() or output.is_relative_to(root) or (diagnostics is not None and output.is_relative_to(Path(diagnostics).resolve())):
+        raise ValueError('browse: output must be new and outside original report/diagnostic directory')
     view = load_view(root)
+    if diagnostics is not None:
+        from .diagnose import load_diagnostics
+        diagnosis = load_diagnostics(diagnostics, view)
+        view['diagnostics'] = {k: v for k, v in diagnosis.items() if k != 'records'}
+        lookup = {(r['window'], r['scenario'], r['member']): r for r in diagnosis['records']}
+        for window in view['windows']:
+            for member in window['members']:
+                member['diagnostics'] = lookup[(window['label'], member['scenario'], member['member'])]
     encoded = json.dumps(view, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False).replace('<', '\\u003c')
     template = files('qfs').joinpath('browser.html').read_text(encoding='utf-8')
     page = template.replace('/*__REPORT_DATA__*/null', encoded)

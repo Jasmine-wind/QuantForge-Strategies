@@ -94,9 +94,12 @@ class StudyConfig:
                 raise ValueError('study: source/Funding intersection has no complete UTC month')
             previous = first_month
             for row in rows:
-                if utc(row['start']) != previous or row['valid'] != (not row['errors']):
+                left, right = utc(row['start']), utc(row['end'])
+                if (left != previous or left != left.normalize().replace(day=1)
+                        or right != left + pd.DateOffset(months=1) or type(row['valid']) is not bool
+                        or row['valid'] != (not row['errors'])):
                     raise ValueError('study: missing/contradictory inspected month evidence')
-                previous = utc(row['end'])
+                previous = right
             if previous > last_month_end:
                 raise ValueError('study: evidence exceeds audited complete-month coverage')
             expected = choose_study_windows(rows)

@@ -117,3 +117,32 @@ def test_timeouts_bounded_and_successful_http_body(tmp_path, monkeypatch):
     target = tmp_path / 'download'
     module.download(module.ORIGIN + 'test', target, timeout=1)
     assert calls == [1, 1] and target.read_bytes() == b'complete'
+
+
+def test_trickling_response_hits_total_deadline_without_full_chunk(tmp_path, monkeypatch):
+    class Trickling(io.BytesIO):
+        def read(self, *args):
+            pytest.fail('full chunk read can block indefinitely on a trickling peer')
+        def read1(self, *args):
+            return b'x'
+    class Opener:
+        def open(self, req, timeout):
+            stream = Trickling()
+            stream.status, stream.headers = 200, {}
+            return stream
+    monkeypatch.setattr(module.urllib.request, 'build_opener', lambda *args: Opener())
+    ticks = iter([0, 5, 6, 11])
+    monkeypatch.setattr(module.time, 'monotonic', lambda: next(ticks))
+    with pytest.raises(ValueError, match='deadline'):
+        module.download(module.ORIGIN + 'fixture', tmp_path / 'download', timeout=1)
+    assert not (tmp_path / 'download').exists()
+
+
+def test_crc_unreadable_cache_is_a_recorded_failure(tmp_path, monkeypatch):
+    pair(tmp_path / 'raw', module.required_objects(START, END)[0])
+    def fail(*args):
+        raise RuntimeError('encrypted or unreadable fixture')
+    monkeypatch.setattr(module.zipfile.ZipFile, 'testzip', fail)
+    result = module.acquire(START, END, tmp_path / 'cache', tmp_path / 'output', [tmp_path / 'raw'], offline=True)
+    assert 'unreadable ZIP' in result['failed_objects'][0]['error']
+    assert len(result['failed_objects']) == 6

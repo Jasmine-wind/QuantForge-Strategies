@@ -113,11 +113,16 @@ PY
 
 ```bash
 .venv/bin/qfs diagnose --run <已独立核账的comparison或study目录> --output .local/diagnostics-new
+.venv/bin/qfs browse --run <同一原报告目录> --diagnostics .local/diagnostics-new --output .local/html/diagnostics-new.html
 ```
 
 独立新目录仅`diagnostics.json`、`diagnostics.csv`和`report.md`，不改变原52/211产物。先复用浏览完整性检查，再按原trades完成顺序计算全区间和Long/Short笔数、净盈亏、fees/slippage/Funding、胜率、均盈/均亏、盈亏比/PF、连续亏损（零打断）；所有方向可加总项与原summary核对。null为n/a，不重复扣滑点，不把跨月交易归入退出月。
 
 固定展示本组**正净盈利最高前5笔**（不足5全列），占全部正交易利润及正总净盈亏的比例；后者总净盈亏非正时n/a，可大于100%表示其他交易抵消。终点强平另列，保留原退出原因。三场景成本差直接来自各次完整重跑结果，不扣估算成本；相对现金/永续差单位为百分点。JSON/CSV保留全部窗口、成员、成本场景和逐笔集中度，不排名选窗。来源全文件SHA、配置、UTC区间、原/诊断代码身份完整保存；这不是独立财务核账或因果/盈利证明。
+
+`browse --diagnostics`可选；不传时保持原浏览行为。传入时核对三文件完整清单、原报告全SHA、完整分组及CSV，错配/缺项不生成HTML；输出不得在原报告或诊断目录内。窗口/成员/场景切换同时更新方向统计、同窗同成员全部三成本结果、固定前5和终点交易。桌面及小屏表格可横向滚动、键盘聚焦后用方向键浏览；仍为自包含file://，无服务器/CDN/在线资源。
+
+完整新环境顺序为：**acquire → scan并保存SHA → 按全部预选窗prepare → study → verify_study → diagnose → browse**。本轮实际三窗及数据缺口、诊断事实和全部本机验收位置见DATA_AUDIT/VALIDATION。新环境只需安装锁定依赖、公开官方对象或有效缓存；README中的`.local`路径都是由前序命令创建的显式位置，不需要旧canonical或旧研究模块。
 
 ## 数据与配置
 

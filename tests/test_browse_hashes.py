@@ -101,6 +101,26 @@ def browse_study_report(complete_study_fixture):
     return run_study(StudyConfig.load(path))
 
 
+def test_study_diagnostics_stay_bound_to_every_window(browse_study_report, tmp_path):
+    from qfs.browse import export_html
+    from qfs.diagnose import diagnose
+    from test_browse_diagnostics import embedded
+    root = browse_study_report
+    before = {str(p.relative_to(root)): sha256(p) for p in root.rglob('*') if p.is_file()}
+    diagnostic = diagnose(root, tmp_path / 'diagnostics')
+    page = tmp_path / 'study.html'
+    export_html(root, page, diagnostic)
+    view = embedded(page)
+    assert len(view['windows']) == 2
+    for w in view['windows']:
+        for member in w['members']:
+            d = member['diagnostics']
+            assert (d['window'], d['member'], d['scenario']) == (w['label'], member['member'], member['scenario'])
+            assert d['summary'] == member['summary']
+            assert d['raw_report'].startswith('windows/' + w['label'] + '/')
+    assert before == {str(p.relative_to(root)): sha256(p) for p in root.rglob('*') if p.is_file()}
+
+
 @pytest.mark.parametrize('level,damage', [
     ('study', 'study.csv'), ('study', 'report.md'), ('study', 'nested_equity'),
     ('window', 'comparison.json'), ('window', 'comparison.csv'), ('window', 'periods.csv'),

@@ -59,7 +59,7 @@ def test_official_identity_accepts_no_canonical_and_independent_association(data
     assert source_identity(moved) == proof['source_identity']
 
 
-@pytest.mark.parametrize('mutation', ['tail_after_four', 'missing_middle', 'shorter_scope', 'identity', 'canonical'])
+@pytest.mark.parametrize('mutation', ['tail_after_four', 'missing_middle', 'shorter_scope', 'identity', 'canonical', 'merged_tail', 'nonboolean_tail'])
 def test_official_full_scan_rejected_by_both_validators(dataset, tmp_path, mutation):
     config, _, _ = dataset()
     raw, proof = official_case(config, tmp_path)
@@ -72,6 +72,11 @@ def test_official_full_scan_rejected_by_both_validators(dataset, tmp_path, mutat
         proof['months'] = proof['months'][:24]
     elif mutation == 'identity':
         proof['source_identity']['sha256'] = 'c' * 64
+    elif mutation == 'merged_tail':
+        proof['months'][24]['end'] = proof['months'][25]['end']
+        del proof['months'][25]  # still adjacent, same final end, but not one row per month
+    elif mutation == 'nonboolean_tail':
+        proof['months'][-1]['valid'] = 1
     else:
         proof['dataset_identity_sha256'] = 'pretend-canonical'
     save(raw, proof)
@@ -163,3 +168,66 @@ def test_empty_manifest_cli_keeps_all_requested_months(tmp_path):
     assert selected_from_months(payload) == []
     assert main(['scan', '--manifest', str(manifest), '--output', str(output)]) == 1
     assert not list(tmp_path.glob('.qfs-scan-*'))
+
+
+def test_scan_publish_failure_cleans_temporary_file(tmp_path, monkeypatch):
+    import os
+    root = tmp_path / 'raw'
+    root.mkdir()
+    manifest = root / 'manifest.json'
+    manifest.write_text(json.dumps({'symbol': 'BTCUSDT', 'archives': []}))
+    def fail(*args):
+        raise OSError('fixture publication failure')
+    monkeypatch.setattr(os, 'link', fail)
+    with pytest.raises(OSError):
+        scan(manifest, tmp_path / 'selection.json')
+    assert not (tmp_path / 'selection.json').exists() and not list(tmp_path.glob('.qfs-scan-*'))
+
+
+def test_independent_source_checks_unused_object_url(dataset, tmp_path):
+    import hashlib
+    config, _, _ = dataset()
+    raw, proof = official_case(config, tmp_path)
+    proof['source_files'][-1]['official_url'] = proof['source_files'][-1]['official_url'].replace('BTCUSDT', 'ETHUSDT')
+    identity = proof['source_identity']
+    identity['objects'] = sorted([{k: o[k] for k in ('kind', 'official_url', 'sha256', 'checksum_sha256')} for o in proof['source_files']], key=lambda o: (o['kind'], o['official_url']))
+    identity['sha256'] = hashlib.sha256(json.dumps({k: v for k, v in identity.items() if k != 'sha256'}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    save(raw, proof)
+    with pytest.raises(ValueError, match='URL'):
+        StudyConfig.from_dict(raw)
+    with pytest.raises(AssertionError, match='URL'):
+        selected_from_months(proof)
+
+
+def test_official_source_study_cli_and_independent_ledger_on_full_synthetic_grid(dataset, tmp_path):
+    import subprocess
+    config, _, _ = dataset()
+    start = pd.Timestamp(SCAN_START)
+    end = start + pd.DateOffset(months=6)
+    minutes = pd.date_range(start - pd.Timedelta(hours=600), end, freq='min', inclusive='left')
+    bars = pd.date_range(minutes[0], end, freq='4h', inclusive='left')
+    for key, times in [('trade_1m', minutes), ('bars_4h', bars), ('mark_1m', minutes[minutes >= start])]:
+        prefix = 'mark_' if key == 'mark_1m' else ''
+        frame = pd.DataFrame({'open_time': times, **{prefix + k: 100. for k in ('open', 'high', 'low', 'close')}})
+        if not prefix:
+            frame['volume'] = 1.
+        frame.to_parquet(config.data[key], index=False)
+    pd.DataFrame({'funding_time': pd.date_range(start, end, freq='8h') + pd.Timedelta(milliseconds=47),
+                  'funding_rate': .0001, 'funding_mark_price': 100.}).to_parquet(config.data['funding'], index=False)
+    raw, proof = official_case(config, tmp_path)
+    for row in proof['months'][6:]:
+        row.update(valid=False, errors=['synthetic fixture: remaining requested months unavailable'])
+    proof['windows'] = proof['windows'][:1]
+    raw['windows'] = raw['windows'][:1]
+    save(raw, proof)
+    path = tmp_path / 'study.json'
+    path.write_text(json.dumps(raw))
+    run = subprocess.run([sys.executable, '-m', 'qfs.cli', 'study', '--config', str(path)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    report = Path(run.stdout.strip())
+    evidence = tmp_path / 'independent-audit.json'
+    proc = subprocess.run([sys.executable, str(Path(__file__).parents[1] / 'tools/verify_study.py'),
+                           '--run', str(report), '--output', str(evidence)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    assert len(json.loads(evidence.read_text())['windows']) == 1
+    assert len([p for p in report.rglob('*') if p.is_file()]) == 55

@@ -46,14 +46,20 @@ def required_objects(start, end):
 
 def checked_pair(path, obj):
     checksum = path.with_name(path.name + '.CHECKSUM')
+    checksum_before = sha256(checksum)
     fields = checksum.read_text(encoding='utf-8').split()
     if len(fields) != 2 or fields[1] != path.name or not re.fullmatch('[0-9a-f]{64}', fields[0]):
         raise ValueError(f'{path}: invalid official CHECKSUM / filename')
     if sha256(path) != fields[0]:
         raise ValueError(f'{path}: corrupt cache ZIP/CHECKSUM SHA mismatch')
-    with zipfile.ZipFile(path) as archive:
-        if archive.namelist() != [path.stem + '.csv'] or archive.testzip() is not None:
-            raise ValueError(f'{path}: corrupt ZIP or unexpected CSV member')
+    try:
+        with zipfile.ZipFile(path) as archive:
+            if archive.namelist() != [path.stem + '.csv'] or archive.testzip() is not None:
+                raise ValueError(f'{path}: corrupt ZIP or unexpected CSV member')
+    except (zipfile.BadZipFile, RuntimeError, NotImplementedError) as exc:
+        raise ValueError(f'{path}: unreadable ZIP: {exc}') from exc
+    if sha256(path) != fields[0] or sha256(checksum) != checksum_before:
+        raise ValueError(f'{path}: cache changed during verification')
     return {'kind': obj['kind'], 'path': str(path.resolve()), 'checksum': str(checksum.resolve()),
             'official_url': obj['official_url'], 'sha256': fields[0]}
 
@@ -78,7 +84,9 @@ def download(url, target, timeout=30, attempts=2):
                 # Overall wall bound also prevents an indefinitely trickling response.
                 deadline = time.monotonic() + timeout * 4
                 with target.open('wb') as file:
-                    while block := response.read(1024 * 1024):
+                    # read1 returns available bytes instead of waiting to fill a
+                    # megabyte; a trickling peer cannot bypass the wall deadline.
+                    while block := response.read1(1024 * 1024):
                         size += len(block)
                         file.write(block)
                         if time.monotonic() > deadline:

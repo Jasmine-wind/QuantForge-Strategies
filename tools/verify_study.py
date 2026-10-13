@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -20,8 +21,13 @@ def official_identity(sources):
                      key=lambda o: (o['kind'], o['official_url']))
     assert len({o['official_url'] for o in objects}) == len(objects)
     for obj in objects:
+        category, stem = {'trade_1m': ('klines', '1m'), 'mark_1m': ('markPriceKlines', '1m'),
+                          'funding': ('fundingRate', 'fundingRate')}[obj['kind']]
+        prefix = f'https://data.binance.vision/data/futures/um/monthly/{category}/BTCUSDT/'
+        prefix += '' if obj['kind'] == 'funding' else '1m/'
+        assert re.fullmatch(re.escape(prefix + f'BTCUSDT-{stem}-') + r'\d{4}-(0[1-9]|1[0-2])\.zip', obj['official_url']), 'invalid official object URL'
         for key in ('sha256', 'checksum_sha256'):
-            assert len(obj[key]) == 64 and all(c in '0123456789abcdef' for c in obj[key])
+            assert isinstance(obj[key], str) and len(obj[key]) == 64 and all(c in '0123456789abcdef' for c in obj[key])
     identity = {'type': 'official-monthly-v1', 'market': 'Binance BTCUSDT USD-M perpetual',
                 'conversion': 'complete 240-minute UTC OHLC; exact Decimal volume sum then float64; native integer-ms Funding; actual-minute Mark Open; no interpolation',
                 'objects': objects}

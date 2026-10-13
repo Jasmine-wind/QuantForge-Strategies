@@ -43,6 +43,7 @@ def main(argv=None):
     browser = sub.add_parser('browse', help='Export standalone offline HTML from existing reports')
     browser.add_argument('--run', required=True)
     browser.add_argument('--output', required=True)
+    browser.add_argument('--diagnostics', help='Optional bound diagnostic directory; validated before export')
     args = parser.parse_args(argv)
     try:
         if args.command == 'acquire':
@@ -56,7 +57,7 @@ def main(argv=None):
             print(diagnose(args.run, args.output))
             return 0
         if args.command == 'browse':
-            print(export_html(args.run, args.output))
+            print(export_html(args.run, args.output, args.diagnostics))
             return 0
         if args.command == 'scan':
             result = scan(args.manifest, args.output)
