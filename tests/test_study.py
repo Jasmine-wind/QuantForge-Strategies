@@ -171,6 +171,10 @@ def test_full_study_cli_deterministic_and_independently_reconciled(complete_stud
                           text=True, capture_output=True)
     assert proc.returncode == 0, proc.stderr
     assert len(json.loads((root / 'audit.json').read_text())['windows']) == 2
+    for window in json.loads((root / 'audit.json').read_text())['windows']:
+        checks = window['comparison']['members']
+        assert len(checks) == 12
+        assert all(row['signal_audit']['status'] == 'passed' for row in checks)
 
 
 def test_later_window_input_failure_cleans_entire_study(complete_study_fixture, tmp_path):

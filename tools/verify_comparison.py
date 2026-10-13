@@ -1,4 +1,4 @@
-"""Independent comparison acceptance: CLI repeatability, raw ledgers and period slices."""
+"""Independent comparison acceptance: signals/timing, ledgers, periods and repeatability."""
 import argparse
 import json
 import math
@@ -12,6 +12,7 @@ import pandas as pd
 from qfs.config import Config
 from qfs.data import sha256
 from ledger import close, reconcile
+from signal_audit import audit_signals
 
 
 def verify(output):
@@ -40,6 +41,11 @@ def verify(output):
         for file, digest in member['artifact_sha256'].items():
             assert sha256(raw / file) == digest
         summary, manifest, trades, curve = reconcile(config, raw)
+        try:
+            signal_evidence = audit_signals(config, trades, member=member['member'],
+                                           bars_sha256=manifest['data_files']['bars_4h']['sha256'])
+        except ValueError as exc:
+            raise ValueError(f'{output}: {scene}/{member["member"]}: {exc}') from exc
         assert manifest['code'] == payload['code'] and manifest['runtime'] == payload['runtime']
         assert member['summary'] == summary
         row = full[(full.member == member['member']) & (full.scenario == scene)].iloc[0]
@@ -100,8 +106,9 @@ def verify(output):
             assert len(trades) == 1 and trades.iloc[0].direction == 'long'
             assert trades.iloc[0].entry_time == config.start.isoformat() and trades.iloc[0].exit_time == config.end.isoformat()
         records.append({'scenario': scene, 'member': member['member'], 'trades': len(trades), 'equity_rows': len(curve),
-                        'period_rows': len(slices), 'final_equity': summary['final_equity'], 'funding_net': summary['funding_net']})
-        print(scene, member['member'], 'PASS: all trades, minute states and periods reconciled')
+                        'period_rows': len(slices), 'final_equity': summary['final_equity'], 'funding_net': summary['funding_net'],
+                        'signal_audit': signal_evidence})
+        print(scene, member['member'], 'PASS: independent signals/timing, ledgers, minute states and periods')
     return {'code': payload['code'], 'runs': [str(output)], 'members': records,
             'artifact_sha256': {str(p.relative_to(output)): sha256(p) for p in sorted(output.rglob('*')) if p.is_file()}}
 

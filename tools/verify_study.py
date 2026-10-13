@@ -1,4 +1,4 @@
-"""Independent study audit; reuse the report ledger verifier, never the engine."""
+"""Independent study audit; separate signal/timing and ledger checks, never the engine."""
 import argparse
 import hashlib
 import json
@@ -130,7 +130,7 @@ def verify(output):
         relative = f"windows/{window['label']}"
         assert window['comparison_path'] == relative
         root = output / relative
-        checked = verify_comparison(root)  # all trades/minutes/periods/annualized-null checks
+        checked = verify_comparison(root)  # independent signals + ledgers/minutes/periods/annualized-null
         assert checked['artifact_sha256'] == window['artifact_sha256']
         comparison = json.loads((root / 'comparison.json').read_text())
         assert comparison['code'] == payload['code'] and comparison['runtime'] == payload['runtime']
@@ -197,7 +197,7 @@ def main():
     with Path(args.output).open('x', encoding='utf-8') as f:
         json.dump(evidence, f, sort_keys=True, indent=2)
         f.write('\n')
-    print('PASS: all windows, members, ledgers, periods, top metrics and percentage-point differences', flush=True)
+    print('PASS: all windows, members, independent signals/timing, ledgers, periods, top metrics and percentage-point differences', flush=True)
 
 
 if __name__ == '__main__':
