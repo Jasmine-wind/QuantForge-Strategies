@@ -1,7 +1,7 @@
 """Funding loader regressions; synthetic inputs prove correctness, not profitability."""
 from dataclasses import replace
-from pathlib import Path
 import subprocess
+import sys
 
 import pandas as pd
 import pytest
@@ -214,7 +214,7 @@ def test_cli_rejects_bad_schedule_without_success_artifacts(dataset, damage):
     else:
         frames["funding"].loc[1, "funding_time"] += pd.Timedelta(milliseconds=48)
     save(config, frames)
-    process = subprocess.run([str(Path(".venv/bin/qfs").resolve()), "backtest", "--config", str(config_path)], text=True, capture_output=True)
+    process = subprocess.run([sys.executable, "-m", "qfs.cli", "backtest", "--config", str(config_path)], text=True, capture_output=True)
     assert process.returncode == 1
     assert str(config.data["funding"]) in process.stderr
     assert "expected" in process.stderr and "actual" in process.stderr

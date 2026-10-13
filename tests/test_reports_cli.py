@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
+import platform
 import subprocess
+import sys
 
 import pandas as pd
 import pytest
@@ -76,11 +78,12 @@ def test_trade_metric_definitions_and_initial_peak_drawdown(dataset):
 
 
 @pytest.mark.parametrize("name", ["ema", "bollinger"])
-def test_cli_config_end_to_end_determinism_manifest(dataset, name):
+def test_cli_config_end_to_end_determinism_manifest(dataset, name, tmp_path, monkeypatch):
     strategy = {"name": "ema"} if name == "ema" else {"name": "bollinger", "params": {"window": 3, "std_multiplier": 1}}
     config, _, path = dataset(strategy=strategy, closes={149: 90})
     outputs = []
-    command = [str(Path(".venv/bin/qfs").resolve()), "backtest", "--config", str(path)]
+    monkeypatch.chdir(tmp_path)  # installed CLI must not depend on the checkout's .venv
+    command = [sys.executable, "-m", "qfs.cli", "backtest", "--config", str(path)]
     for _ in range(2):
         process = subprocess.run(command, capture_output=True, text=True)
         assert process.returncode == 0, process.stderr
@@ -100,6 +103,7 @@ def test_cli_config_end_to_end_determinism_manifest(dataset, name):
     assert summary["trade_count"] == 1
     assert summary["config"] == config.as_dict()
     assert manifest["config"] == config.as_dict()
+    assert manifest["runtime"]["python"] == platform.python_version()
     assert len(manifest["code"]["git_commit"]) == 40
     assert manifest["market"] == "Binance BTCUSDT USD-M perpetual"
     assert manifest["data_source"]["independent_out_of_sample"] is False
@@ -127,7 +131,7 @@ def test_cli_failure_is_nonzero_without_partial_success(dataset, failure):
         save(config, frames)
     else:
         path.write_text("{ broken JSON")
-    process = subprocess.run([str(Path(".venv/bin/qfs").resolve()), "backtest", "--config", str(path)], capture_output=True, text=True)
+    process = subprocess.run([sys.executable, "-m", "qfs.cli", "backtest", "--config", str(path)], capture_output=True, text=True)
     assert process.returncode != 0
     assert process.stderr.startswith("qfs:")
     assert not process.stdout

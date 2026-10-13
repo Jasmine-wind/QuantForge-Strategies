@@ -5,12 +5,53 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: '3.12'
-      - run: uv sync --locked --extra test
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --locked --extra test --python "$UV_PYTHON"
+      - name: Assert actual test interpreter
+        run: |
+          .venv/bin/python - <<'PY'
+          import os, platform, sys
+          assert '.'.join(map(str, sys.version_info[:2])) == os.environ['UV_PYTHON']
+          print(sys.executable, platform.python_version())
+          PY
       - run: .venv/bin/python -m pytest -q
-      - run: .venv/bin/python -m compileall -q src tools
+      - run: .venv/bin/python -m compileall -q src tools tests
       - run: .venv/bin/qfs --help
+      - name: Build and install wheel over editable package (keep locked dependencies)
+        run: |
+          uv build --wheel --python "$UV_PYTHON"
+          uv pip install --python .venv/bin/python --no-deps --reinstall dist/*.whl
+      - name: Exercise installed wheel outside checkout
+        run: |
+          PYTHON="$GITHUB_WORKSPACE/.venv/bin/python"
+          CLI="$GITHUB_WORKSPACE/.venv/bin/qfs"
+          cd "$RUNNER_TEMP"
+          "$PYTHON" -I - <<'PY'
+          from importlib.resources import files
+          from pathlib import Path
+          import os, platform, sys, qfs
+          assert '.'.join(map(str, sys.version_info[:2])) == os.environ['UV_PYTHON']
+          assert Path(qfs.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
+          for name in ('browser.html', '_download.py'):
+              assert files('qfs').joinpath(name).is_file(), name
+          print(platform.python_version(), qfs.__file__)
+          PY
+          "$CLI" --help
+          for command in backtest acquire prepare scan compare study diagnose browse; do
+            "$CLI" "$command" --help
+          done
+          "$PYTHON" -I -m pytest -q \
+            "$GITHUB_WORKSPACE/tests/test_prepare.py" \
+            "$GITHUB_WORKSPACE/tests/test_download_transport.py" \
+            "$GITHUB_WORKSPACE/tests/test_browse_diagnostics.py" \
+            "$GITHUB_WORKSPACE/tests/test_compare.py"
