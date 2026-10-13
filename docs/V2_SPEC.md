@@ -1,6 +1,6 @@
 # V2：探索性历史比较 / 分期验证
 
-本文件包含第一阶段比较、第二阶段多窗口、第8节独立数据准备/离线浏览及第9节独立研究流程扩展。V1_SPEC.md 的策略、成交、账户、指标与已验收 Funding 修复契约继续有效；不放松验证、不增加搜索、优化、组合、显著性筛选、模拟盘或实盘。单体 Python 离线 CLI，复用 V1 账户和报告，不引入新运行依赖。
+本文件包含第一阶段比较、第二阶段多窗口、第8节独立数据准备/离线浏览、第9节独立研究流程及第10节只读仓位暴露研究扩展。V1_SPEC.md 的策略、成交、账户、指标与已验收 Funding 修复契约继续有效；不放松验证、不增加搜索、优化、组合、显著性筛选、模拟盘或实盘。单体 Python 离线 CLI，复用 V1 账户和报告，不引入新运行依赖。
 
 ## 1. 比较输入与成员
 
@@ -179,3 +179,50 @@
 - [x] 诊断方向核对、集中度/连续亏损/终点标记、成本完整结果、错配/清单及失败清理测试。
 - [x] 离线浏览/CLI/确定性验证，复现链不要求canonical或隐含本机绝对路径。
 - [x] 最终锁定安装、全pytest、编译、CLI、wheel、diff检查；分阶段自审/修复/提交，不以基线CI替代新代码CI。
+
+## 10. 只读仓位暴露与已有收益归因（基线8cd67bc）
+
+本节在新研究工具实现及计算本轮暴露结果**之前**冻结。目标是解释已有结果，不增加策略、调参、收益筛窗、组合、因果推断或实盘/保证金系统。先确认基线Python 3.11/3.12真实CI成功并修复已复现的验证失效，再进入本节工具实现；保留429项原测试和全部原始产物。
+
+### 10.1 验证运行环境与职责
+
+`tools/ledger.py`、`verify_comparison.py`、`verify_study.py`、`verify_real.py` 依赖assert的财务/身份/完整性校验，必须在模块导入公共边界用显式异常拒绝 `-O`、`-OO`、启动环境 `PYTHONOPTIMIZE=1/2`。不得只在 `__main__` 检查而让直接调用函数绕过；拒绝发生在读取报告、运行子进程或写成功JSON之前。保留原核账公式/容差，不为修复重写账本。Signal Audit的显式检查继续有效，不能以它替代被关闭的财务断言。
+
+新研究工具只做交易时间分配，复用既有 `browse.load_view` / `diagnose.load_diagnostics` 的完整性、诊断分组及CSV绑定校验；不重复实现Long/Short盈亏、连亏、前5或成本诊断，也不调用信号/账户引擎或重读行情。它不是一次新的Signal/Ledger Audit；使用者应先独立核验报告。研究工具自身输入检查用显式异常，不依赖assert。
+
+### 10.2 输入与固定研究范围
+
+公开入口：`python tools/exposure_review.py --source LABEL RUN DIAGNOSTICS [--source LABEL RUN DIAGNOSTICS ...] --output NEW_DIRECTORY`。每组明确报告根目录和对应已有诊断目录；支持完整comparison或study，不能按窗口/成员/场景过滤。标签为1～64位ASCII字母/数字/下划线/连字符（首字符字母或数字），必须唯一；拒绝重复报告路径或全文件SHA相同的报告副本，避免把重复运行当额外样本。
+
+保留命令提供的来源顺序、每份报告原窗口顺序以及固定三场景/四成员顺序。不排序盈利、不重新选择。来源间窗口若重叠，JSON逐对记录交集并在中文报告警示；不合并净值/收益/年化或将窗口视为独立统计样本。
+
+本轮真实研究固定仅以下两份已有study及其已有诊断：
+
+- canonical：`runs/study-g5jo08cs` / `.local/independent/delivery/diagnostics-old`，四窗 `[2020-02,2020-08)`、`[2021-08,2022-02)`、`[2023-03,2023-09)`、`[2023-09,2024-03)` UTC。
+- official：`runs/study-nk39lxqo` / `.local/independent/delivery/diagnostics-new`，三窗 `[2024-09,2025-03)`、`[2025-03,2025-09)`、`[2025-09,2026-03)` UTC。
+
+全部七窗、84个成员/场景记录均保留。2020-02及366天报告仅作已有证据对照，分别被上述第一窗及第三/四窗覆盖，不加入本轮84行作为新样本。已见历史不会因新增分析成为独立OOS、显著性检验或未来盈利证据。
+
+### 10.3 时间分配算法（非资金/风险权重）
+
+从原 `trades.csv` 的 `entry_time/exit_time/direction/exit_reason` 计算，忽略报告预先计算的 holding_hours，独立用时间差得到时长。时间转UTC并要求分钟对齐，不截断/舍入亚分钟；窗口 `[start,end)` 长度为正。每笔持仓是 `[entry,exit)`，要求 `start ≤ entry < exit ≤ end`，方向只能long/short，原因只能reverse_signal/strategy_exit/end_of_test；end退出与end_of_test标记必须对应。
+
+按报告原交易顺序扫描，不排序纠错。游标从start开始，要求本笔entry不早于上笔exit；重复、错序、重叠、越界、零时长、非法时间/方向/原因一律失败。相邻半开区间共用边界不重复计时；entry与上一exit之间归Flat。EMA反向延迟的那一分钟自然归Flat，不从策略名猜测或重新生成订单。跨月交易按实际持续分钟完整计入其研究窗口，不截断到月份或把交易归入退出月；最后补齐exit到end的Flat尾段。
+
+全部时长为整数分钟，严格满足 `long_minutes + short_minutes + flat_minutes = window_minutes`，总持仓分钟为Long+Short；各fraction是对应分钟/窗口分钟，参与率为总持仓分钟/窗口分钟。Long/Short分别计笔数及平均持仓小时数（对应分钟÷60÷笔数，零笔为null），另计end_of_test笔数。无交易时Flat=整个窗口、参与率0、均时null；永续基准应全窗口Long，现金应全窗口Flat。
+
+暴露只按时间计，不按仓位名义金额、杠杆或风险加权，不是资金利用率。相邻交易的时间核对不替代独立信号时序核验。不得把收益除以参与率外推满仓收益，也不将低参与率与相对基准落后直接解释成因果关系。
+
+### 10.4 固定三文件输出契约
+
+输出必须是不存在的新目录，位于所有原报告/诊断目录之外。私有同级staging全部成功后发布；错误或中断清理自己的staging，拒绝覆盖，包括最终发布前新出现的目标。读取前后及发布前检查来源完整SHA快照，检测变化则失败，不发布成功子集。固定输入、参数、代码及依赖环境重复生成三个文件相同字节；不写生成时间、随机staging名或目标输出路径。
+
+1. **exposure.json**：`exposure_version=qfs-exposure-review-1`、completed状态、固定definitions/limitations、研究代码/脚本SHA及runtime；有序sources记录标签、实际报告/诊断路径、两棵完整来源文件SHA清单、原窗口配置/数据来源/数据SHA/代码身份和诊断代码；records为下述全部CSV字段加原已验证的完整 `diagnostic_record`，不丢弃已有集中度逐笔/终点明细。另记录窗口overlaps，以及exposure.csv/report.md的SHA。原行情SHA仅是原报告记录的来源，本工具不假冒重新验证行情或核账。
+2. **exposure.csv**：每窗口每成员每场景一行，固定顺序字段为：
+   `source, window, scenario, member, start, end, raw_report, window_minutes, long_minutes, short_minutes, flat_minutes, holding_minutes, long_fraction, short_fraction, flat_fraction, participation_rate, long_trade_count, short_trade_count, long_average_holding_hours, short_average_holding_hours, end_of_test_count, initial_equity, total_return, maximum_drawdown, trade_count, net_pnl, long_net_pnl, short_net_pnl, fees, slippage_cost, funding_net, top5_net_pnl, top5_positive_profit_share, top5_total_net_share, max_consecutive_losses, return_minus_cash_pp, return_minus_perpetual_pp, cost_return_change_pp`。
+   后17项金融/诊断字段从原summary/诊断复制，不另算财务指标；成本变化是既有 `cost_change_from_base.return_pp`。fraction/return/drawdown为0～1口径（return可超范围），百分点字段不再乘100；CSV浮点17位有效数字、LF，null为空，JSON仍为null，Markdown为n/a。
+3. **report.md**：中文、每窗独立，固定展示全部三场景/四成员的时间暴露表、收益/回撤/方向净盈亏/集中度/同窗同场景基准差表及费用/滑点/Funding/相对base成本变化表。另逐策略给出base暴露与方向/集中度事实、三场景实际收益，不排名筛窗。只用事先固定的描述：Flat>50%称“超过一半时间空仓”；base正收益（或正基准收益差）在较高成本场景变为≤0时说明“由正变为非正”。这是观察而非成本/暴露的因果识别；前5按原定义，不足5笔全列，净收益非正时净盈亏集中度为n/a，不改变分母。
+
+### 10.5 验收与禁止变更
+
+手算验证Long/Short/Flat完整分配、相邻交易、1分钟反向间隔、跨月、空交易、终点平仓、占比加总；负例覆盖错序/重叠/越界/无效时间及完整性/诊断错配。公开CLI验证三文件确定性、源文件不变、错误无成功目录/staging、来源变化及目标保护。实际只读运行七窗并对时间累计独立复核；保留原429项测试，两Python版本全测、编译、CLI和必要安装验证。更新README/VALIDATION，提交后按用户授权正常push main并查询真实CI；禁止force push、分支/PR、真实策略重跑或修改任何历史产物。
