@@ -199,8 +199,9 @@ def test_independent_source_checks_unused_object_url(dataset, tmp_path):
         selected_from_months(proof)
 
 
-def test_official_source_study_cli_and_independent_ledger_on_full_synthetic_grid(dataset, tmp_path):
-    import subprocess
+@pytest.fixture
+def official_study_fixture(dataset, tmp_path):
+    """One minimum legal six-month study; synthetic provenance, never real evidence."""
     config, _, _ = dataset()
     start = pd.Timestamp(SCAN_START)
     end = start + pd.DateOffset(months=6)
@@ -222,6 +223,12 @@ def test_official_source_study_cli_and_independent_ledger_on_full_synthetic_grid
     save(raw, proof)
     path = tmp_path / 'study.json'
     path.write_text(json.dumps(raw))
+    return path
+
+
+def test_official_source_study_cli_and_independent_ledger_on_full_synthetic_grid(official_study_fixture, tmp_path):
+    import subprocess
+    path = official_study_fixture
     run = subprocess.run([sys.executable, '-m', 'qfs.cli', 'study', '--config', str(path)], capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     report = Path(run.stdout.strip())
@@ -231,3 +238,51 @@ def test_official_source_study_cli_and_independent_ledger_on_full_synthetic_grid
     assert proc.returncode == 0, proc.stderr
     assert len(json.loads(evidence.read_text())['windows']) == 1
     assert len([p for p in report.rglob('*') if p.is_file()]) == 55
+
+
+@pytest.mark.parametrize('key', ['bars_4h', 'trade_1m', 'mark_1m', 'funding'])
+def test_study_rejects_normalized_replacement_after_config_validation(official_study_fixture, key):
+    from qfs.study import run_study
+    study = StudyConfig.load(official_study_fixture)
+    config = study.windows[0][1]
+    path = config.data[key]
+    frame = pd.read_parquet(path)
+    # Still valid schema, times, OHLC and Funding; only the source binding is bad.
+    numeric = frame.select_dtypes(include='number').columns
+    frame[numeric] *= 1.01
+    frame.to_parquet(path, index=False)
+    assert sha256(path) != config.data_source['normalized_files'][key]['sha256']
+    with pytest.raises(ValueError, match='official normalized hash mismatch'):
+        run_study(study)
+    assert not list(config.output_dir.iterdir())
+
+
+def test_study_cli_rejects_replacement_between_config_and_loading(official_study_fixture, monkeypatch, capsys):
+    from qfs.cli import main
+    raw = json.loads(official_study_fixture.read_text())
+    output = Path(raw['output_dir'])
+    output.mkdir()
+    preserved = output / 'previous-evidence.txt'
+    preserved.write_bytes(b'keep previous evidence')
+    funding = Path(raw['windows'][0]['data']['funding'])
+    original_mkdir = Path.mkdir
+    changed = False
+
+    def mkdir(path, *args, **kwargs):
+        nonlocal changed
+        if path == output and not changed:
+            # Filesystem boundary reached only after StudyConfig.load completed.
+            changed = True
+            frame = pd.read_parquet(funding)
+            frame['funding_rate'] = .0002
+            frame.to_parquet(funding, index=False)
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'mkdir', mkdir)
+    assert main(['study', '--config', str(official_study_fixture)]) == 1
+    captured = capsys.readouterr()
+    assert changed and not captured.out
+    assert 'window-01' in captured.err and 'official normalized hash mismatch' in captured.err
+    assert str(funding) in captured.err
+    assert list(output.iterdir()) == [preserved]
+    assert preserved.read_bytes() == b'keep previous evidence'

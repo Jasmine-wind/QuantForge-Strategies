@@ -190,6 +190,12 @@ def run_study(study):
         for label, config in study.windows:
             try:
                 data = load_data(config)
+                # Bind the actual loaded snapshot, not just the files seen when
+                # StudyConfig was parsed (earlier windows may take a long time).
+                if 'source_identity' in study.selection:
+                    for key, info in data.files.items():
+                        if info['sha256'] != config.data_source['normalized_files'][key]['sha256']:
+                            raise ValueError(f'study: official normalized hash mismatch {config.data[key]}')
                 relative = f'windows/{label}'
                 comparison = write_comparison(config, data, staging / relative)
                 if comparison['code'] != identity:
